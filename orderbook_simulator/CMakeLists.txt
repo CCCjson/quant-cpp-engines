@@ -99,6 +99,28 @@ target_link_libraries(orderbook_server PRIVATE
 )
 
 # ============================================================
+# Benchmark 程序
+# ============================================================
+# 进程内直接打 MatchingEngine / LimitOrderBook，不经 HTTP。
+# 源码放在仓库的 benchmarks/ 目录（与本子项目平级）。
+
+set(BENCH_OB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../benchmarks/bench_orderbook.cpp)
+if(EXISTS ${BENCH_OB_SRC})
+    # 除 main.cpp 外的全部源文件（bench 自带 main）
+    file(GLOB_RECURSE OB_LIB_SOURCES "src/*.cpp")
+    list(FILTER OB_LIB_SOURCES EXCLUDE REGEX "main\\.cpp$")
+
+    add_executable(bench_orderbook ${BENCH_OB_SRC} ${OB_LIB_SOURCES})
+    target_include_directories(bench_orderbook PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(bench_orderbook PRIVATE
+        nlohmann_json::nlohmann_json
+        httplib::httplib
+    )
+endif()
+
+# ============================================================
 # 单元测试
 # ============================================================
 

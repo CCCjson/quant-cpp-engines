@@ -21,3 +21,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# ── benchmark 合成数据 ──
+# 由 benchlib.synth_bars() 用固定种子生成，任何机器上逐位可复现，
+# 跑 bench.py 时会自动重建。5MB 的可再生数据没必要进仓库。
+# ⚠️ 真实 fixture（cpp_bars.json / cpp_parity_golden.json）不在此列，必须保留。
+benchmarks/data/synth_*.json

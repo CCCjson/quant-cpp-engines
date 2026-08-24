@@ -88,6 +88,18 @@ target_link_libraries(backtest_server PRIVATE
     httplib::httplib                # HTTP 服务器库
 )
 
+# ── Benchmark 程序 ──
+# 进程内计时用，绕开 HTTP 层直接构造 BacktestEngine。
+# 源码放在仓库的 benchmarks/ 目录（与本子项目平级），复用这里的 LIB_SOURCES 和依赖。
+set(BENCH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../benchmarks/bench_backtest.cpp)
+if(EXISTS ${BENCH_SRC})
+    add_executable(bench_backtest ${BENCH_SRC} ${LIB_SOURCES})
+    target_link_libraries(bench_backtest PRIVATE
+        nlohmann_json::nlohmann_json
+        httplib::httplib
+    )
+endif()
+
 # ── 测试程序 ──
 enable_testing()   # 启用 CMake 的测试功能
 

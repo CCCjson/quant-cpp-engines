@@ -1,0 +1,93 @@
+{
+  "input": {
+    "bars": 180,
+    "request": {
+      "symbol": "TEST.SH",
+      "strategy": "MA_CROSS",
+      "params": {
+        "fast_period": 5,
+        "slow_period": 20,
+        "position_pct": 0.95
+      },
+      "initial_capital": 1000000.0,
+      "market": "a_share",
+      "start_date": "2024-01-02",
+      "end_date": "2024-09-27"
+    }
+  },
+  "comparisons": [
+    {
+      "metric": "最终资产",
+      "python": 1448492.3318395005,
+      "cpp": 1448492.3318395005,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "总收益率",
+      "python": 0.44849233183950044,
+      "cpp": 0.44849233183950044,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "年化收益率",
+      "python": 0.6798971009257946,
+      "cpp": 0.6798971009257946,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "最大回撤",
+      "python": 0.09834731542362063,
+      "cpp": 0.09834731542362063,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "回撤金额",
+      "python": 119475.7256924999,
+      "cpp": 119475.7256924999,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "总手续费",
+      "python": 3612.7501604999998,
+      "cpp": 3612.7501604999998,
+      "diff": 0.0,
+      "ok": true
+    },
+    {
+      "metric": "胜率",
+      "python": 1.0,
+      "cpp": 1.0,
+      "diff": 0.0,
+      "ok": true
+    }
+  ],
+  "known_differences": {
+    "num_trades": {
+      "python_fills": 5,
+      "cpp_round_trips": 2
+    },
+    "sharpe_ratio": {
+      "python": 5.4794889453532285,
+      "cpp": 4.220052939417914,
+      "diff": 1.2594360059353145,
+      "cause": "两种标准夏普算法：C++ 日均算术超额×sqrt(252)；Python (几何年化-rf)/年化波动率",
+      "historical_record_2026_07_15": 0.018
+    },
+    "volatility": {
+      "python": 0.11860542240475307,
+      "cpp": 0.11827365833556998,
+      "diff": 0.0003317640691830881,
+      "cause": "pandas .std() ddof=1（样本） vs C++ ddof=0（总体），比值 sqrt(n/(n-1))"
+    },
+    "profit_factor_zero_loss_sentinel": {
+      "python": "inf",
+      "cpp": 0.0
+    }
+  },
+  "passed": true
+}

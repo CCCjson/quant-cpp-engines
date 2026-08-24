@@ -1,0 +1,976 @@
+{
+  "environment": {
+    "cpu": "Apple M5",
+    "cores": "10",
+    "os": "Darwin 25.2.0",
+    "python": "3.10.19",
+    "python_impl": "CPython",
+    "pandas": "2.1.4",
+    "numpy": "1.26.3",
+    "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+    "cpp_build_type": "Release (-O2)",
+    "timestamp": "2026-08-24 13:43:52"
+  },
+  "config": {
+    "sizes": [
+      250,
+      1000,
+      2500,
+      10000,
+      25000
+    ],
+    "strategies": [
+      "MA_CROSS",
+      "MACD",
+      "RSI",
+      "KDJ"
+    ],
+    "warmup": 3,
+    "runs": 10,
+    "initial_capital": 1000000.0,
+    "symbol": "TEST.SH"
+  },
+  "results": [
+    {
+      "bars": 250,
+      "strategy": "MA_CROSS",
+      "cpp_inproc": {
+        "median": 4.8709e-05,
+        "p95": 5.2708e-05,
+        "min": 4.4541e-05,
+        "max": 5.2708e-05,
+        "runs": 10
+      },
+      "cpp_trades": 11,
+      "cpp_final_value": 988163.2689622506,
+      "py_pure_engine": {
+        "median": 0.014429249975364655,
+        "p95": 0.01536012499127537,
+        "min": 0.014178375015035272,
+        "max": 0.01536012499127537,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.014442916493862867,
+        "p95": 0.014664374990388751,
+        "min": 0.014205999905243516,
+        "max": 0.014664374990388751,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00012889550998806953,
+        "p95": 0.0001377089647576213,
+        "min": 0.00012245902325958014,
+        "max": 0.0001377089647576213,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.008924479348948687,
+      "py_trades": 11,
+      "py_final_value": 988163.2689622506,
+      "speedup_vs_py_pure": 318.3218835462893,
+      "speedup_vs_py_end_to_end": 318.94209616406266,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 250,
+      "strategy": "MACD",
+      "cpp_inproc": {
+        "median": 0.0001965,
+        "p95": 0.000200792,
+        "min": 0.000194417,
+        "max": 0.000200792,
+        "runs": 10
+      },
+      "cpp_trades": 11,
+      "cpp_final_value": 1022804.2187335005,
+      "py_pure_engine": {
+        "median": 0.014113062992691994,
+        "p95": 0.014506833045743406,
+        "min": 0.013997666887007654,
+        "max": 0.014506833045743406,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.014418604027014226,
+        "p95": 0.020570999942719936,
+        "min": 0.01427408296149224,
+        "max": 0.020570999942719936,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00016118749044835567,
+        "p95": 0.00021425005979835987,
+        "min": 0.00015462504234164953,
+        "max": 0.00021425005979835987,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.011179132885982586,
+      "py_trades": 11,
+      "py_final_value": 1022804.2187335005,
+      "speedup_vs_py_pure": 71.9981631596396,
+      "speedup_vs_py_end_to_end": 73.4199322152499,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 250,
+      "strategy": "RSI",
+      "cpp_inproc": {
+        "median": 0.000137625,
+        "p95": 0.000139875,
+        "min": 0.000134875,
+        "max": 0.000139875,
+        "runs": 10
+      },
+      "cpp_trades": 1,
+      "cpp_final_value": 1017923.8908250001,
+      "py_pure_engine": {
+        "median": 0.011986395984422415,
+        "p95": 0.01221687498036772,
+        "min": 0.01189091696869582,
+        "max": 0.01221687498036772,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.012332979531493038,
+        "p95": 0.01290379196871072,
+        "min": 0.012254583998583257,
+        "max": 0.01290379196871072,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0002874585334211588,
+        "p95": 0.00029154110234230757,
+        "min": 0.00028116710018366575,
+        "max": 0.00029154110234230757,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.023308117287239093,
+      "py_trades": 1,
+      "py_final_value": 1010422.96144,
+      "speedup_vs_py_pure": 88.16249837772618,
+      "speedup_vs_py_end_to_end": 90.85882482730867,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.007423553968241402
+    },
+    {
+      "bars": 250,
+      "strategy": "KDJ",
+      "cpp_inproc": {
+        "median": 0.0001495,
+        "p95": 0.00015175,
+        "min": 0.000141833,
+        "max": 0.00015175,
+        "runs": 10
+      },
+      "cpp_trades": 41,
+      "cpp_final_value": 920560.7990695017,
+      "py_pure_engine": {
+        "median": 0.014015583496075124,
+        "p95": 0.014251125045120716,
+        "min": 0.013789542019367218,
+        "max": 0.014251125045120716,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.014941478963010013,
+        "p95": 0.015298750018700957,
+        "min": 0.014434208045713603,
+        "max": 0.015298750018700957,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00027020799461752176,
+        "p95": 0.0002757910406216979,
+        "min": 0.0002685829531401396,
+        "max": 0.0002757910406216979,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.01808442091217772,
+      "py_trades": 0,
+      "py_final_value": 1000000.0,
+      "speedup_vs_py_pure": 97.22379149681116,
+      "speedup_vs_py_end_to_end": 101.76903855741331,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.0794392009304983
+    },
+    {
+      "bars": 1000,
+      "strategy": "MA_CROSS",
+      "cpp_inproc": {
+        "median": 0.000204458,
+        "p95": 0.000235375,
+        "min": 0.000193167,
+        "max": 0.000235375,
+        "runs": 10
+      },
+      "cpp_trades": 49,
+      "cpp_final_value": 1056513.6461420024,
+      "py_pure_engine": {
+        "median": 0.05798333301208913,
+        "p95": 0.06334979098755866,
+        "min": 0.05662425002083182,
+        "max": 0.06334979098755866,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.05699772894149646,
+        "p95": 0.05755004193633795,
+        "min": 0.05663987505249679,
+        "max": 0.05755004193633795,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.000135770533233881,
+        "p95": 0.0001413340214639902,
+        "min": 0.00013325002510100603,
+        "max": 0.0001413340214639902,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0023820340872394833,
+      "py_trades": 49,
+      "py_final_value": 1056513.6461420024,
+      "speedup_vs_py_pure": 293.13625008843036,
+      "speedup_vs_py_end_to_end": 293.217138809925,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 1000,
+      "strategy": "MACD",
+      "cpp_inproc": {
+        "median": 0.002606333,
+        "p95": 0.002621583,
+        "min": 0.002575,
+        "max": 0.002621583,
+        "runs": 10
+      },
+      "cpp_trades": 53,
+      "cpp_final_value": 1280343.1030040039,
+      "py_pure_engine": {
+        "median": 0.056282500037923455,
+        "p95": 0.061892249970696867,
+        "min": 0.05586379102896899,
+        "max": 0.061892249970696867,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.05727754149120301,
+        "p95": 0.161566499969922,
+        "min": 0.056586958933621645,
+        "max": 0.161566499969922,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00017781247152015567,
+        "p95": 0.00018483400344848633,
+        "min": 0.00017437501810491085,
+        "max": 0.00018483400344848633,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.003104401252059065,
+      "py_trades": 53,
+      "py_final_value": 1280343.1030040039,
+      "speedup_vs_py_pure": 21.694676127754946,
+      "speedup_vs_py_end_to_end": 21.975518032474426,
+      "workload_identical": true,
+      "noisy": true,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 1000,
+      "strategy": "RSI",
+      "cpp_inproc": {
+        "median": 0.001650292,
+        "p95": 0.0021255,
+        "min": 0.001639167,
+        "max": 0.0021255,
+        "runs": 10
+      },
+      "cpp_trades": 10,
+      "cpp_final_value": 1166677.5373237506,
+      "py_pure_engine": {
+        "median": 0.04726741701597348,
+        "p95": 0.04868387500755489,
+        "min": 0.04648949997499585,
+        "max": 0.04868387500755489,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.047344791470095515,
+        "p95": 0.05286699999123812,
+        "min": 0.04700433393009007,
+        "max": 0.05286699999123812,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0003007295308634639,
+        "p95": 0.00030408299062401056,
+        "min": 0.0002947910688817501,
+        "max": 0.00030408299062401056,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.006351903166653808,
+      "py_trades": 10,
+      "py_final_value": 1157295.823513,
+      "speedup_vs_py_pure": 28.361661731230466,
+      "speedup_vs_py_end_to_end": 28.67574440559752,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.008106582275802302
+    },
+    {
+      "bars": 1000,
+      "strategy": "KDJ",
+      "cpp_inproc": {
+        "median": 0.001744,
+        "p95": 0.001850208,
+        "min": 0.001694333,
+        "max": 0.001850208,
+        "runs": 10
+      },
+      "cpp_trades": 160,
+      "cpp_final_value": 871338.281540007,
+      "py_pure_engine": {
+        "median": 0.056025104015134275,
+        "p95": 0.061438333010300994,
+        "min": 0.0555600420339033,
+        "max": 0.061438333010300994,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.05801602092105895,
+        "p95": 0.060300208046101034,
+        "min": 0.056418583961203694,
+        "max": 0.060300208046101034,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00030122953467071056,
+        "p95": 0.0004085409455001354,
+        "min": 0.00029279105365276337,
+        "max": 0.0004085409455001354,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.005192178468781694,
+      "py_trades": 3,
+      "py_final_value": 1064791.4498062504,
+      "speedup_vs_py_pure": 32.791689729175616,
+      "speedup_vs_py_end_to_end": 33.29840353767748,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.18168174462843797
+    },
+    {
+      "bars": 2500,
+      "strategy": "MA_CROSS",
+      "cpp_inproc": {
+        "median": 0.000538125,
+        "p95": 0.000596041,
+        "min": 0.000527167,
+        "max": 0.000596041,
+        "runs": 10
+      },
+      "cpp_trades": 129,
+      "cpp_final_value": 1110625.2387630066,
+      "py_pure_engine": {
+        "median": 0.14254402095684782,
+        "p95": 0.14896829205099493,
+        "min": 0.14104291691910475,
+        "max": 0.14896829205099493,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.14214762498158962,
+        "p95": 0.14653087500482798,
+        "min": 0.1411426670383662,
+        "max": 0.14653087500482798,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00015470845391973853,
+        "p95": 0.00016908301040530205,
+        "min": 0.00014749995898455381,
+        "max": 0.00016908301040530205,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0010883646767912989,
+      "py_trades": 129,
+      "py_final_value": 1110625.2387630066,
+      "speedup_vs_py_pure": 267.5488354147827,
+      "speedup_vs_py_end_to_end": 267.7380546171634,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 2500,
+      "strategy": "MACD",
+      "cpp_inproc": {
+        "median": 0.016405208,
+        "p95": 0.017221459,
+        "min": 0.016279167,
+        "max": 0.017221459,
+        "runs": 10
+      },
+      "cpp_trades": 147,
+      "cpp_final_value": 1825488.9630755112,
+      "py_pure_engine": {
+        "median": 0.14189156203065068,
+        "p95": 0.1540130419889465,
+        "min": 0.14108966698404402,
+        "max": 0.1540130419889465,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.1427786244894378,
+        "p95": 0.1501313749467954,
+        "min": 0.14063395792618394,
+        "max": 0.1501313749467954,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0001967914868146181,
+        "p95": 0.00020574999507516623,
+        "min": 0.00019333302043378353,
+        "max": 0.00020574999507516623,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0013782979596443444,
+      "py_trades": 147,
+      "py_final_value": 1825488.9630755112,
+      "speedup_vs_py_pure": 8.666884920097202,
+      "speedup_vs_py_end_to_end": 8.638891530886312,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 2500,
+      "strategy": "RSI",
+      "cpp_inproc": {
+        "median": 0.010233833,
+        "p95": 0.011711,
+        "min": 0.010108167,
+        "max": 0.011711,
+        "runs": 10
+      },
+      "cpp_trades": 31,
+      "cpp_final_value": 1587963.308570002,
+      "py_pure_engine": {
+        "median": 0.11648979148594663,
+        "p95": 0.12064724997617304,
+        "min": 0.11475604097358882,
+        "max": 0.12064724997617304,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.11571854149224237,
+        "p95": 0.12177737499587238,
+        "min": 0.11494600004516542,
+        "max": 0.12177737499587238,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00031370791839435697,
+        "p95": 0.00032041699159890413,
+        "min": 0.00030816695652902126,
+        "max": 0.00032041699159890413,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0027109563804464955,
+      "py_trades": 31,
+      "py_final_value": 1575288.5500207518,
+      "speedup_vs_py_pure": 11.352804219952919,
+      "speedup_vs_py_end_to_end": 11.371596852838445,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.008045991668690303
+    },
+    {
+      "bars": 2500,
+      "strategy": "KDJ",
+      "cpp_inproc": {
+        "median": 0.010377583,
+        "p95": 0.010453708,
+        "min": 0.010245834,
+        "max": 0.010453708,
+        "runs": 10
+      },
+      "cpp_trades": 392,
+      "cpp_final_value": 779940.3148717671,
+      "py_pure_engine": {
+        "median": 0.14236714551225305,
+        "p95": 0.17261087498627603,
+        "min": 0.13950520800426602,
+        "max": 0.17261087498627603,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.14068345847772434,
+        "p95": 0.14643962495028973,
+        "min": 0.1403527499642223,
+        "max": 0.14643962495028973,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00032685446785762906,
+        "p95": 0.00041191698983311653,
+        "min": 0.0003196669276803732,
+        "max": 0.00041191698983311653,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.002323332617739013,
+      "py_trades": 3,
+      "py_final_value": 1140187.4498062504,
+      "speedup_vs_py_pure": 13.615798187269677,
+      "speedup_vs_py_end_to_end": 13.698518828649997,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.3159543064569772
+    },
+    {
+      "bars": 10000,
+      "strategy": "MA_CROSS",
+      "cpp_inproc": {
+        "median": 0.002239458,
+        "p95": 0.002299625,
+        "min": 0.00221,
+        "max": 0.002299625,
+        "runs": 10
+      },
+      "cpp_trades": 534,
+      "cpp_final_value": 1192323.5813377795,
+      "py_pure_engine": {
+        "median": 0.5722795419860631,
+        "p95": 0.5873957090079784,
+        "min": 0.5658840830437839,
+        "max": 0.5873957090079784,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.5799337909556925,
+        "p95": 0.5902766670333222,
+        "min": 0.5739618330262601,
+        "max": 0.5902766670333222,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0002808540593832731,
+        "p95": 0.0009345829021185637,
+        "min": 0.00024516601115465164,
+        "max": 0.0009345829021185637,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0004842864198694893,
+      "py_trades": 534,
+      "py_final_value": 1192323.5813377795,
+      "speedup_vs_py_pure": 256.05614617365785,
+      "speedup_vs_py_end_to_end": 259.7112366634661,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0
+    },
+    {
+      "bars": 10000,
+      "strategy": "MACD",
+      "cpp_inproc": {
+        "median": 0.287757333,
+        "p95": 0.293086084,
+        "min": 0.285781458,
+        "max": 0.293086084,
+        "runs": 10
+      },
+      "cpp_trades": 634,
+      "cpp_final_value": 4196287.192249588,
+      "py_pure_engine": {
+        "median": 0.5807293334510177,
+        "p95": 0.7128037499496713,
+        "min": 0.5746419999049976,
+        "max": 0.7128037499496713,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.5741851249476895,
+        "p95": 0.6018215409712866,
+        "min": 0.5680082080652937,
+        "max": 0.6018215409712866,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00030602049082517624,
+        "p95": 0.0003197919577360153,
+        "min": 0.00029566697776317596,
+        "max": 0.0003197919577360153,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0005329648531961812,
+      "py_trades": 634,
+      "py_final_value": 4196287.192249586,
+      "speedup_vs_py_pure": 2.0107742606065004,
+      "speedup_vs_py_end_to_end": 1.9875614465697553,
+      "workload_identical": true,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 4.4387933044030104e-16
+    },
+    {
+      "bars": 10000,
+      "strategy": "RSI",
+      "cpp_inproc": {
+        "median": 0.188413,
+        "p95": 0.192128875,
+        "min": 0.178486834,
+        "max": 0.192128875,
+        "runs": 10
+      },
+      "cpp_trades": 97,
+      "cpp_final_value": 3187054.294784758,
+      "py_pure_engine": {
+        "median": 0.48320464603602886,
+        "p95": 0.5112674169940874,
+        "min": 0.46632691705599427,
+        "max": 0.5112674169940874,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.4746003750478849,
+        "p95": 0.4961839580209926,
+        "min": 0.46721154102124274,
+        "max": 0.4961839580209926,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.000429582956712693,
+        "p95": 0.0004392080008983612,
+        "min": 0.0004236249951645732,
+        "max": 0.0004392080008983612,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0009051466861343086,
+      "py_trades": 97,
+      "py_final_value": 3161190.5020482596,
+      "speedup_vs_py_pure": 2.612668433885685,
+      "speedup_vs_py_end_to_end": 2.6176246760096755,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.0081816621680155
+    },
+    {
+      "bars": 10000,
+      "strategy": "KDJ",
+      "cpp_inproc": {
+        "median": 0.163620708,
+        "p95": 0.164275917,
+        "min": 0.163036,
+        "max": 0.164275917,
+        "runs": 10
+      },
+      "cpp_trades": 1674,
+      "cpp_final_value": 282344.0143167964,
+      "py_pure_engine": {
+        "median": 0.5797859994927421,
+        "p95": 0.7539636669680476,
+        "min": 0.5507753340061754,
+        "max": 0.7539636669680476,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 0.5559861459769309,
+        "p95": 0.5652383749838918,
+        "min": 0.5497896249871701,
+        "max": 0.5652383749838918,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0006140420446172357,
+        "p95": 0.0006380409467965364,
+        "min": 0.0006034160032868385,
+        "max": 0.0006380409467965364,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0011044196857428776,
+      "py_trades": 13,
+      "py_final_value": 1336259.959061251,
+      "speedup_vs_py_pure": 3.378243664013932,
+      "speedup_vs_py_end_to_end": 3.3721977047227,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.788705773601756
+    },
+    {
+      "bars": 25000,
+      "strategy": "MA_CROSS",
+      "cpp_inproc": {
+        "median": 0.006048084,
+        "p95": 0.006291208,
+        "min": 0.005898709,
+        "max": 0.006291208,
+        "runs": 10
+      },
+      "cpp_trades": 1307,
+      "cpp_final_value": 2227014.9665290904,
+      "py_pure_engine": {
+        "median": 1.4847444164915942,
+        "p95": 1.9571852919179946,
+        "min": 1.4250392080284655,
+        "max": 1.9571852919179946,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 1.4488477084669285,
+        "p95": 1.5898414590628818,
+        "min": 1.4213227909058332,
+        "max": 1.5898414590628818,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.00039254152216017246,
+        "p95": 0.00041804194916039705,
+        "min": 0.00038591690827161074,
+        "max": 0.00041804194916039705,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0002709335976902176,
+      "py_trades": 1305,
+      "py_final_value": 2249476.99419584,
+      "speedup_vs_py_pure": 241.58493121604496,
+      "speedup_vs_py_end_to_end": 240.95489214772812,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.009985444494300921
+    },
+    {
+      "bars": 25000,
+      "strategy": "MACD",
+      "cpp_inproc": {
+        "median": 1.956001708,
+        "p95": 993.106546917,
+        "min": 1.663654667,
+        "max": 993.106546917,
+        "runs": 10
+      },
+      "cpp_trades": 1529,
+      "cpp_final_value": 55650527.518741295,
+      "py_pure_engine": {
+        "median": 1.4841500625479966,
+        "p95": 2.550804208032787,
+        "min": 1.4346472079632804,
+        "max": 2.550804208032787,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 1.4765719580464065,
+        "p95": 1.8758257500594482,
+        "min": 1.428924374980852,
+        "max": 1.8758257500594482,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0005827295244671404,
+        "p95": 0.0006154170259833336,
+        "min": 0.0005595419788733125,
+        "max": 0.0006154170259833336,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.00039465027172676817,
+      "py_trades": 1529,
+      "py_final_value": 55650527.51874128,
+      "speedup_vs_py_pure": 0.8623467576659527,
+      "speedup_vs_py_end_to_end": 0.8589068412602553,
+      "workload_identical": true,
+      "noisy": true,
+      "trades_match": true,
+      "final_value_rel_diff": 2.677631616129682e-16
+    },
+    {
+      "bars": 25000,
+      "strategy": "RSI",
+      "cpp_inproc": {
+        "median": 1.089999917,
+        "p95": 1.095147417,
+        "min": 1.085608292,
+        "max": 1.095147417,
+        "runs": 10
+      },
+      "cpp_trades": 261,
+      "cpp_final_value": 21963746.646724366,
+      "py_pure_engine": {
+        "median": 1.1567896875785664,
+        "p95": 1.2650056671118364,
+        "min": 1.1510852499632165,
+        "max": 1.2650056671118364,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 1.1620555625413544,
+        "p95": 1.1788272089324892,
+        "min": 1.1578463329933584,
+        "max": 1.1788272089324892,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.0008475625072605908,
+        "p95": 0.001077249995432794,
+        "min": 0.0007251659408211708,
+        "max": 0.001077249995432794,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0007293648725427691,
+      "py_trades": 261,
+      "py_final_value": 21786545.310020868,
+      "speedup_vs_py_pure": 1.060313612603851,
+      "speedup_vs_py_end_to_end": 1.066541533926823,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": true,
+      "final_value_rel_diff": 0.008133521592429478
+    },
+    {
+      "bars": 25000,
+      "strategy": "KDJ",
+      "cpp_inproc": {
+        "median": 1.001358958,
+        "p95": 1.017916542,
+        "min": 0.999957584,
+        "max": 1.017916542,
+        "runs": 10
+      },
+      "cpp_trades": 4149,
+      "cpp_final_value": 50469.918268563626,
+      "py_pure_engine": {
+        "median": 1.3871774164726958,
+        "p95": 1.3900603329529986,
+        "min": 1.378554583992809,
+        "max": 1.3900603329529986,
+        "runs": 10
+      },
+      "py_end_to_end": {
+        "median": 1.3902161869918928,
+        "p95": 1.487949209054932,
+        "min": 1.3813174999086186,
+        "max": 1.487949209054932,
+        "runs": 10
+      },
+      "py_indicator_prep": {
+        "median": 0.001352645514998585,
+        "p95": 0.0015592500567436218,
+        "min": 0.0012807080056518316,
+        "max": 0.0015592500567436218,
+        "runs": 10
+      },
+      "py_indicator_prep_share": 0.0009729749427859835,
+      "py_trades": 21,
+      "py_final_value": 1524813.1629435015,
+      "speedup_vs_py_pure": 1.37861305924433,
+      "speedup_vs_py_end_to_end": 1.381376092356952,
+      "workload_identical": false,
+      "noisy": false,
+      "trades_match": false,
+      "final_value_rel_diff": 0.9669009164564553
+    }
+  ],
+  "http": [
+    {
+      "strategy": "MA_CROSS",
+      "bars": 25000,
+      "http": {
+        "median": 0.06516058347187936,
+        "p95": 0.0666621660348028,
+        "min": 0.06392083293758333,
+        "max": 0.0666621660348028,
+        "runs": 10
+      },
+      "inproc_min": 0.005898709,
+      "transport_overhead_s": 0.058022123937583325,
+      "transport_share": 0.9077185210374229
+    },
+    {
+      "strategy": "MACD",
+      "bars": 25000,
+      "http": {
+        "median": 1.7280176249914803,
+        "p95": 1.735213959007524,
+        "min": 1.7144445829326287,
+        "max": 1.735213959007524,
+        "runs": 10
+      },
+      "inproc_min": 1.663654667,
+      "transport_overhead_s": 0.050789915932628604,
+      "transport_share": 0.02962470553918421
+    },
+    {
+      "strategy": "RSI",
+      "bars": 25000,
+      "http": {
+        "median": 1.1588944380055182,
+        "p95": 1.1886901670368388,
+        "min": 1.153328667045571,
+        "max": 1.1886901670368388,
+        "runs": 10
+      },
+      "inproc_min": 1.085608292,
+      "transport_overhead_s": 0.06772037504557082,
+      "transport_share": 0.05871732575506598
+    },
+    {
+      "strategy": "KDJ",
+      "bars": 25000,
+      "http": {
+        "median": 1.0693881249753758,
+        "p95": 1.111579000018537,
+        "min": 1.0655741669470444,
+        "max": 1.111579000018537,
+        "runs": 10
+      },
+      "inproc_min": 0.999957584,
+      "transport_overhead_s": 0.06561658294704442,
+      "transport_share": 0.061578616470255844
+    }
+  ],
+  "logging_cost": {
+    "bars": 25000,
+    "logging_off_median_s": 1.5102505839895457,
+    "logging_on_median_s": 1.470551166916266,
+    "slowdown_x": 0.9737133575751331,
+    "note": "日志写内存 StringIO，不含终端渲染；写终端会更慢"
+  },
+  "cold_start": {
+    "import_pandas_seconds": 0.38563825003802776
+  },
+  "workload_mismatches": [
+    "RSI@250: 笔数相同但净值有相对偏差 —— 成交 C++=1 Py=1, 净值 C++=1.017924e+06 Py=1.010423e+06 (相对差 7.42e-03)",
+    "KDJ@250: 成交笔数不同 —— 成交 C++=41 Py=0, 净值 C++=9.205608e+05 Py=1.000000e+06 (相对差 7.94e-02)",
+    "RSI@1000: 笔数相同但净值有相对偏差 —— 成交 C++=10 Py=10, 净值 C++=1.166678e+06 Py=1.157296e+06 (相对差 8.11e-03)",
+    "KDJ@1000: 成交笔数不同 —— 成交 C++=160 Py=3, 净值 C++=8.713383e+05 Py=1.064791e+06 (相对差 1.82e-01)",
+    "RSI@2500: 笔数相同但净值有相对偏差 —— 成交 C++=31 Py=31, 净值 C++=1.587963e+06 Py=1.575289e+06 (相对差 8.05e-03)",
+    "KDJ@2500: 成交笔数不同 —— 成交 C++=392 Py=3, 净值 C++=7.799403e+05 Py=1.140187e+06 (相对差 3.16e-01)",
+    "RSI@10000: 笔数相同但净值有相对偏差 —— 成交 C++=97 Py=97, 净值 C++=3.187054e+06 Py=3.161191e+06 (相对差 8.18e-03)",
+    "KDJ@10000: 成交笔数不同 —— 成交 C++=1674 Py=13, 净值 C++=2.823440e+05 Py=1.336260e+06 (相对差 7.89e-01)",
+    "MA_CROSS@25000: 成交笔数不同 —— 成交 C++=1307 Py=1305, 净值 C++=2.227015e+06 Py=2.249477e+06 (相对差 9.99e-03)",
+    "RSI@25000: 笔数相同但净值有相对偏差 —— 成交 C++=261 Py=261, 净值 C++=2.196375e+07 Py=2.178655e+07 (相对差 8.13e-03)",
+    "KDJ@25000: 成交笔数不同 —— 成交 C++=4149 Py=21, 净值 C++=5.046992e+04 Py=1.524813e+06 (相对差 9.67e-01)"
+  ]
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "bars": 250,
+    "macd_naive_min": 0.000406875,
+    "macd_incr_min": 4.7458e-05,
+    "ma_cross_min": 4.8e-05,
+    "speedup": 8.57337013780606,
+    "trades_naive": 11,
+    "trades_incr": 11,
+    "final_naive": 1022804.2187335005,
+    "final_incr": 1022804.2187335005,
+    "bitwise_identical": true
+  },
+  {
+    "bars": 1000,
+    "macd_naive_min": 0.002617333,
+    "macd_incr_min": 0.000200958,
+    "ma_cross_min": 0.000193917,
+    "speedup": 13.024278705003034,
+    "trades_naive": 53,
+    "trades_incr": 53,
+    "final_naive": 1280343.1030040039,
+    "final_incr": 1280343.1030040039,
+    "bitwise_identical": true
+  },
+  {
+    "bars": 2500,
+    "macd_naive_min": 0.016786416,
+    "macd_incr_min": 0.000510125,
+    "ma_cross_min": 0.000507333,
+    "speedup": 32.90647586375888,
+    "trades_naive": 147,
+    "trades_incr": 147,
+    "final_naive": 1825488.9630755112,
+    "final_incr": 1825488.9630755112,
+    "bitwise_identical": true
+  },
+  {
+    "bars": 10000,
+    "macd_naive_min": 0.27982275,
+    "macd_incr_min": 0.002329167,
+    "ma_cross_min": 0.002381125,
+    "speedup": 120.13855167963483,
+    "trades_naive": 634,
+    "trades_incr": 634,
+    "final_naive": 4196287.192249588,
+    "final_incr": 4196287.192249588,
+    "bitwise_identical": true
+  },
+  {
+    "bars": 25000,
+    "macd_naive_min": 1.604382875,
+    "macd_incr_min": 0.005782292,
+    "ma_cross_min": 0.00588775,
+    "speedup": 277.4648660081504,
+    "trades_naive": 1529,
+    "trades_incr": 1529,
+    "final_naive": 55650527.518741295,
+    "final_incr": 55650527.518741295,
+    "bitwise_identical": true
+  }
+]

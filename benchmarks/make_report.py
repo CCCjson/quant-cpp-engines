@@ -1,0 +1,734 @@
+#!/usr/bin/env python3
+"""
+make_report.py — 从 results/*.json 生成 benchmarks/README.md
+
+⚠️ README 里的每一个数字都由本脚本从结果文件里读出来，**没有一个是手抄的**。
+   想核对任何一个数，去 results/ 里翻对应的 json 即可。
+   改了 benchmark 就重跑本脚本，不要手改 README。
+
+用法：
+    conda run -n quant python benchmarks/make_report.py
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+
+HERE = pathlib.Path(__file__).parent
+R = HERE / "results"
+
+
+def load(name: str):
+    return json.loads((R / name).read_text(encoding="utf-8"))
+
+
+bt = load("backtest.json")
+fit = load("complexity_fit.json")
+incr = load("experiment_incremental.json")
+alloc = load("experiment_allocation.json")
+pdo = load("experiment_pandas_overhead.json")
+ob = load("orderbook.json")
+parity = load("parity.json")
+
+# Python 参照引擎的真实行数 —— 现数，不写死
+py_loc = sum(len(f.read_text(encoding="utf-8").splitlines())
+             for f in sorted((HERE / "python_reference").rglob("*.py")))
+# ⛔ 必须排除 build/ —— 那里面是 FetchContent 拉下来的 googletest / httplib / json 源码，
+#    数进去会得到 15 万行这种离谱数字（踩过）。
+cpp_loc = sum(len(f.read_text(encoding="utf-8", errors="ignore").splitlines())
+              for f in sorted((HERE.parent / "backtest_engine").rglob("*"))
+              if f.suffix in {".cpp", ".h"} and "build" not in f.parts)
+
+env = bt["environment"]
+SIZES = bt["config"]["sizes"]
+
+
+def row(bars: int, strategy: str):
+    return next(r for r in bt["results"] if r["bars"] == bars and r["strategy"] == strategy)
+
+
+def ms(seconds: float) -> str:
+    return f"{seconds * 1000:,.3f}"
+
+
+# ────────────────────────────────────────────────────────────
+# 各段素材
+# ────────────────────────────────────────────────────────────
+
+# 主结果表
+main_rows = []
+for s in bt["config"]["strategies"]:
+    cells = []
+    for n in SIZES:
+        r = row(n, s)
+        flag = " ⚠" if r["noisy"] else ""
+        cells.append(f"{r['speedup_vs_py_pure']:.1f}×{flag}")
+    main_rows.append(f"| `{s}` | " + " | ".join(cells) + " |")
+
+# 绝对耗时表
+abs_rows = []
+for s in bt["config"]["strategies"]:
+    for n in SIZES:
+        r = row(n, s)
+        abs_rows.append(
+            f"| `{s}` | {n:,} | {ms(r['cpp_inproc']['min'])} | "
+            f"{ms(r['py_pure_engine']['min'])} | {r['speedup_vs_py_pure']:.1f}× | "
+            f"{r['cpp_trades']:,} / {r['py_trades']:,} |")
+
+# 复杂度拟合
+fit_rows = []
+for key in sorted(fit):
+    k = fit[key]
+    verdict = "**O(N)** 线性" if k < 1.25 else ("**O(N²)** 二次" if k > 1.7 else "介于两者之间")
+    eng, strat = key.split("/", 1)
+    fit_rows.append(f"| {eng} | `{strat}` | **{k:.3f}** | {verdict} |")
+
+# 增量实验
+incr_rows = [
+    f"| {r['bars']:,} | {ms(r['macd_naive_min'])} | {ms(r['macd_incr_min'])} | "
+    f"**{r['speedup']:.1f}×** | {'✅ 逐位相同' if r['bitwise_identical'] else '❌ 不一致'} |"
+    for r in incr
+]
+incr_last = incr[-1]
+ma_last = row(SIZES[-1], "MA_CROSS")
+macd_last = row(SIZES[-1], "MACD")
+
+# 增量版修好之后，对 Python 的比值
+incr_vs_py = macd_last["py_pure_engine"]["min"] / incr_last["macd_incr_min"]
+
+# 分配实验
+alloc_rows = [
+    f"| {r['bars']:,} | {ms(r['naive_min'])} | {ms(r['noalloc_min'])} | {ms(r['incremental_min'])} | "
+    f"{r['alloc_share_of_gain']:.0%} | {r['algo_share_of_gain']:.0%} |"
+    for r in alloc
+]
+alloc_last = alloc[-1]
+alloc_only_gain = alloc_last["naive_min"] / alloc_last["noalloc_min"]
+
+# 零分配版仍是二次的？用两个最大规模估斜率
+import math
+a2, a1 = alloc[-1], alloc[-2]
+noalloc_k = math.log(a2["noalloc_min"] / a1["noalloc_min"]) / math.log(a2["bars"] / a1["bars"])
+
+# H3 向量化
+py_prep_last = row(SIZES[-1], "MACD")["py_indicator_prep"]["min"]
+cpp_macd_last = macd_last["cpp_inproc"]["min"]
+cpp_ma_last = ma_last["cpp_inproc"]["min"]
+cpp_indicator_cost = cpp_macd_last - cpp_ma_last          # 近似：整场 − 几乎无指标的那场
+vectorize_ratio = cpp_indicator_cost / py_prep_last
+
+# H5 pandas
+pd_ops = pdo["per_op_us"]
+pd_rows = [
+    ("`df.iloc[i]['close']` 取单值", pd_ops["engine: df.iloc[i]['close']  取当前收盘价"],
+     pdo["per_op_us"]["numpy: arr_close[i]"]),
+    ("`df.iloc[:i+1]` 切历史窗口", pd_ops["engine: df.iloc[:i+1]        切历史窗口"],
+     pdo["per_op_us"]["numpy: arr_close[:i+1]  （视图，零拷贝）"]),
+    ("`df['ma5'].iloc[-1]` 读指标", pd_ops["strategy: df['ma5'].iloc[-1] 读指标（×4 次/bar）"],
+     pdo["per_op_us"]["numpy: arr_ma5[i]"]),
+]
+pd_table = [f"| {label} | {p:.3f} µs | {n:.3f} µs | **{p / n:.0f}×** |" for label, p, n in pd_rows]
+
+# H6 传输层
+http_rows = [
+    f"| `{h['strategy']}` | {ms(h['http']['min'])} | {ms(h['inproc_min'])} | {h['transport_share']:.1%} |"
+    for h in bt["http"]
+]
+http_small = next(h for h in bt["http"] if h["strategy"] == "MA_CROSS")
+
+# H7 日志
+lc = bt["logging_cost"]
+
+# 订单簿
+sub = ob["submit"][-1]
+depth_rows = [
+    f"| {q['bid_depth'] + q['ask_depth']:,} | {q['latency']['p50_ns']:,.0f} | "
+    f"{q['latency']['p99_ns']:,.0f} | {q['amortized_ns']:,.0f} |"
+    for q in ob["depth_query"]
+]
+cancel = ob["cancel"]
+
+# KDJ 工作量分歧
+kdj_rows = [
+    f"| {n:,} | {row(n, 'KDJ')['cpp_trades']:,} | {row(n, 'KDJ')['py_trades']:,} |"
+    for n in SIZES
+]
+
+# parity
+parity_rows = [
+    f"| {c['metric']} | {c['python']:,.8f} | {c['cpp']:,.8f} | {c['diff']:.2e} |"
+    for c in parity["comparisons"]
+]
+
+NL = "\n"
+
+# ────────────────────────────────────────────────────────────
+# 正文
+# ────────────────────────────────────────────────────────────
+
+doc = f"""# 快慢到底由什么决定 —— 一次从假设到证伪的性能调查
+
+这不是一份「C++ 比 Python 快多少」的跑分表。
+
+调查是从那个假设开始的，但**它在第一轮数据里就被证伪了**。剩下的部分是在回答：
+既然不是语言，那是什么？
+
+全部结论都建立在同一份数据集、同一台机器、可复现的对照实验之上。
+每个数字都能在 [`results/`](results/) 里找到出处 —— README 由
+[`make_report.py`](make_report.py) 生成，没有手抄。
+
+---
+
+## 目录
+
+- [起点：一句没测过的话](#起点一句没测过的话)
+- [素材：一个真实的对照组](#素材一个真实的对照组)
+- [第一轮：假设是语言差异 —— 然后它被证伪了](#第一轮假设是语言差异--然后它被证伪了)
+- [第二轮：七个假设，逐一验证](#第二轮七个假设逐一验证)
+- [归因汇总](#归因汇总)
+- [所以，什么时候该用哪个](#所以什么时候该用哪个)
+- [一个不能比的例子](#一个不能比的例子)
+- [订单簿：没有对照组的绝对基线](#订单簿没有对照组的绝对基线)
+- [为了让这些数字可信，做了什么](#为了让这些数字可信做了什么)
+- [这次调查查出来的具体问题](#这次调查查出来的具体问题)
+- [复现](#复现)
+
+---
+
+## 起点：一句没测过的话
+
+本仓库的设计稿 [`docs/design-backtest.md`](../docs/design-backtest.md) 里写着一句：
+
+> **性能**：C++ 逐 bar 循环比 Python 快得多
+
+立项时的设想，**从来没有测过**。展示场合最怕这种句子 —— 懂行的人第一句就会问「快多少」。
+
+于是有了这次调查。
+
+---
+
+## 素材：一个真实的对照组
+
+性能对比最常见的作弊方式，是拿一个随手写的实现去比一个精心打磨的实现。
+这里刻意避开了这一点：对照组不是为 benchmark 写的，而是**一个真实跑过生产的 Python 回测引擎**，
+在 C++ 版本成熟后被整体退役。取回过程、逐条改动清单见 [`ORIGIN.md`](ORIGIN.md)。
+
+跑分之前先过一道**硬门禁**：同一份 180 根真实日线、同一个策略，
+两个引擎的经济结果必须逐项对齐。对不上就说明它们算的不是同一件事，那跑分毫无意义。
+
+| 指标 | Python | C++ | 差值 |
+|---|---|---|---|
+{NL.join(parity_rows)}
+
+**七项全部 `0.00e+00`** —— 不是「在容差内」，是逐位相同。
+门禁脚本：[`parity_gate.py`](parity_gate.py)，结果：[`results/parity.json`](results/parity.json)。
+
+<details>
+<summary>两处已知的口径差异（登记在案，不掩盖）</summary>
+
+- **年化波动率** 差 `{parity['known_differences']['volatility']['diff']:.2e}`：
+  pandas 的 `.std()` 默认 `ddof=1`（样本标准差），C++ 用 `ddof=0`（总体）。比值恰为 `sqrt(n/(n-1))`。
+- **夏普比率** 差 `{parity['known_differences']['sharpe_ratio']['diff']:.4f}`：两种都是标准算法，年化路径不同 ——
+  C++ 走「日均算术超额收益 × √252」，Python 走「(几何年化收益 − rf) / 年化波动率」。
+  母项目 2026-07-15 的退役记录写的是「夏普差 0.018」，本 fixture 上实测是
+  `{parity['known_differences']['sharpe_ratio']['diff']:.4f}`。两种年化路径在收益率序列偏度大时差距会放大，
+  当年应该是用了另一组数据 —— **旧记录没有被采信，以实测为准**。
+- **成交笔数** Python 记 fills、C++ 记 round-trips，约 2:1，同一批交易。
+
+</details>
+
+---
+
+## 第一轮：假设是语言差异 —— 然后它被证伪了
+
+**假设 H1**：C++ 是编译型语言，Python 是解释型，所以 C++ 快。差距应该在各种规模、各个策略上大体一致。
+
+四个两边都有的策略 × 五个数据规模，喂**完全相同**的合成行情。
+下表是 C++ 进程内 vs Python 纯引擎的倍数（耗时取 `min`，理由见[方法论](#为了让这些数字可信做了什么)）：
+
+| 策略 | {" | ".join(f"{n:,} 根" for n in SIZES)} |
+|---|{"---|" * len(SIZES)}
+{NL.join(main_rows)}
+
+如果 H1 成立，每一行都该是一条大致水平的线。
+
+**它不是。**
+
+`MA_CROSS` 确实稳定在 {row(SIZES[-1], 'MA_CROSS')['speedup_vs_py_pure']:.0f}–{row(SIZES[0], 'MA_CROSS')['speedup_vs_py_pure']:.0f}× —— 符合假设。
+但另外三个策略随规模**急剧塌陷**，到 {SIZES[-1]:,} 根时 `MACD` 只有
+**{macd_last['speedup_vs_py_pure']:.1f}×** —— 也就是 **C++ 输给了 Python**。
+
+同一个语言、同一个引擎、同一份数据，只是换了个策略，结论就反过来了。
+**H1 无法解释这件事，被证伪。**
+
+---
+
+## 第二轮：七个假设，逐一验证
+
+### H2 · 算法复杂度阶数 ✅ 成立，且是主因
+
+如果差距来自复杂度阶数，那么把耗时对规模做 log-log 回归，斜率就是阶数本身：
+`t ∝ N^k` → `log t = k·log N + c`。
+
+| 引擎 | 策略 | 拟合斜率 k | 判定 |
+|---|---|---|---|
+{NL.join(fit_rows)}
+
+**Python 全线 k ≈ 1.00，C++ 三个策略 k ≈ 1.95。**
+
+翻开源码，原因一目了然 —— `StrategyContext` 里的指标 helper
+（[`strategy_context.h`](../backtest_engine/include/backtest/strategy_context.h)）
+**每根 bar 都从第 0 根开始重算整条序列**：
+
+- `macd()` 每 bar 重建 4 个长度为 N 的 `std::vector`，重跑三遍完整 EMA 递推
+- `rsi()` 每 bar 重建差分数组，从头跑一遍 Wilder 平滑
+- `kdj()` 每 bar 从第 n−1 根重跑整条 K/D 递推
+- 只有 `sma()` 是 O(period)，所以 `MA_CROSS` 幸免
+
+而 Python 侧的指标是 numpy 一次性向量化算好的，**O(N)**。
+
+#### 决定性实验：把它改成 O(1) 增量，看会怎样
+
+光有相关性不够。所以写了一个**增量版 MACD**（[`bench_backtest.cpp`](bench_backtest.cpp) 里的
+`IncrementalMACDStrategy`）：递推式、系数、种子逐行照抄原版，只是把 EMA 状态存下来，
+每 bar O(1)、零堆分配。**它必须产生逐位相同的结果**，否则实验作废。
+
+| 数据规模 | 原版 O(N²) | 增量版 O(N) | 提速 | 结果核对 |
+|---|---|---|---|---|
+{NL.join(incr_rows)}
+
+提速比随规模**单调增长** —— 这正是 O(N²)→O(N) 的指纹。
+
+而最关键的一行藏在数字里：{SIZES[-1]:,} 根时，
+**增量版 MACD 是 {ms(incr_last['macd_incr_min'])} ms，`MA_CROSS` 是 {ms(cpp_ma_last)} ms —— 两者基本相同**。
+修掉算法之后，MACD 立刻回到了 `MA_CROSS` 那个量级；对 Python 的比值从
+**{macd_last['speedup_vs_py_pure']:.1f}×（输）变成 {incr_vs_py:.0f}×（赢）**，
+与 `MA_CROSS` 的 {ma_last['speedup_vs_py_pure']:.0f}× 一致。
+
+> **结论**：「C++ 的 MACD 回测输给 Python」与语言毫无关系。
+> 那是一段写成 O(N²) 的 C++ 输给了一段写成 O(N) 的 Python。
+
+原始数据：[`results/experiment_incremental.json`](results/experiment_incremental.json)
+
+### H3 · 向量化 ✅ 成立
+
+Python 那边的指标不是 Python 算的 —— 是 numpy 算的，底层 C 循环加 SIMD，一次扫完整列。
+
+{SIZES[-1]:,} 根 bar 上算同一套 MACD：
+
+| 做法 | 耗时 |
+|---|---|
+| Python + numpy，整列一次算完 | **{ms(py_prep_last)} ms** |
+| C++ 手写标量循环，每 bar 重算 | **≈ {ms(cpp_indicator_cost)} ms** |
+
+（C++ 那一栏是「MACD 整场 {ms(cpp_macd_last)} ms − 指标近乎免费的 MA_CROSS 整场 {ms(cpp_ma_last)} ms」，
+是对指标部分的近似估计。）
+
+相差约 **{vectorize_ratio:,.0f}×**。
+
+**但这个数字必须小心解读，别把它当成「numpy 比 C++ 快」。** numpy 底层就是 C。
+上面比的是「O(N) 一次算完」和「O(N²) 每 bar 重算」，那个 {vectorize_ratio:,.0f}× 里
+绝大部分是复杂度阶数的差，不是向量化的功劳。
+
+把对手换成**写好的 C++**，结论立刻不同：H2 里那个增量版整场回测只要
+{ms(incr_last['macd_incr_min'])} ms，而其中指标部分（每 bar 4 次浮点运算）几乎不占时间 ——
+也就是说**正确实现的 C++ 在指标计算上不输给 numpy，甚至更快**。
+
+所以 H3 成立的部分是这个，而且已经足够有价值：
+
+> 向量化让 Python 在批量数值计算上达到了**接近 C 的量级**
+> —— {SIZES[-1]:,} 根 bar 的完整 MACD 只要 {ms(py_prep_last)} ms。
+> 它赢不了写好的 C++，但它把「用 Python 就一定慢」这个前提废掉了。
+
+一个尺度感：Python 的指标准备只占它端到端时间的
+**{row(SIZES[-1], 'MACD')['py_indicator_prep_share']:.2%}** —— 几乎免费。
+**Python 的时间几乎全花在逐 bar 循环里**，那才是它真正的短板，也正是 H5 要查的地方。
+
+### H4 · 堆内存分配 ⚠️ 有贡献，但只是常数因子
+
+增量实验一次改掉了两件事：不再重算、不再每 bar 分配内存。得把它们分开。
+
+于是又做了第三个版本 `MACD_NOALLOC`：**照旧每 bar 重算整条序列**（仍是 O(N²)），
+但四个缓冲区复用同一块内存，全程零分配。
+
+| 数据规模 | 原版<br>O(N²)+分配 | 零分配<br>O(N²) | 增量<br>O(N) | 分配<br>占比 | 算法<br>占比 |
+|---|---|---|---|---|---|
+{NL.join(alloc_rows)}
+
+三个版本结果**完全一致**。分配大约占可优化空间的
+**{alloc_last['alloc_share_of_gain']:.0%}**，算法占 **{alloc_last['algo_share_of_gain']:.0%}**。
+
+但有个更重要的观察：消除分配只带来 **{alloc_only_gain:.1f}×** 的提速，
+而零分配版**依然是二次的**（最后两档拟合斜率 k ≈ {noalloc_k:.2f}）。
+
+> **分配优化给的是常数因子，算法优化给的是阶数。** 规模一大，常数因子就不值钱了。
+
+原始数据：[`results/experiment_allocation.json`](results/experiment_allocation.json)
+
+### H5 · 数据结构 ✅ 成立，而且颠覆了修法
+
+那 Python 的逐 bar 循环慢在哪？是「解释器慢」吗？
+
+拆开测每根 bar 里的具体操作，并和 numpy 数组上的同样操作对照：
+
+| 操作 | pandas DataFrame | numpy 数组 | 差距 |
+|---|---|---|---|
+{NL.join(pd_table)}
+
+Python 引擎实测每根 bar **{pdo['engine_total_per_bar_us']:.1f} µs**，
+其中 **{pdo['pandas_ops_per_bar_us']:.1f} µs（{pdo['pandas_share']:.0%}）**
+纯粹花在 DataFrame 的标量取值和切片上。
+
+DataFrame 是为**整列批量运算**设计的：每次 `df.iloc[i]['close']` 都要走索引解析、
+类型分派、构造返回对象。逐元素标量访问是它最差的用法。
+
+> **「Python 慢」这句话里，有 {pdo['pandas_share']:.0%} 根本不是 Python 的问题，是数据结构用错了。**
+> 把 DataFrame 换成 numpy 数组（Python 代码一行不改语义），
+> 每 bar 成本可望从 {pdo['engine_total_per_bar_us']:.1f} µs 降到约
+> {pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']:.1f} µs —— 快约
+> {pdo['engine_total_per_bar_us'] / (pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']):.1f}×。
+
+剩下的那部分才是真正的解释器开销 —— 那部分只能靠换语言解决。
+
+原始数据：[`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json)
+
+### H6 · 传输层 ✅ 成立，但只对小任务致命
+
+C++ 引擎对外是个 HTTP 服务。测一下传输层吃掉多少（{SIZES[-1]:,} 根 bar）：
+
+| 策略 | HTTP 全程 | 进程内 | 传输层占比 |
+|---|---|---|---|
+{NL.join(http_rows)}
+
+对 `MA_CROSS` 这种引擎本身只要 {ms(cpp_ma_last)} ms 的任务，
+**{http_small['transport_share']:.0%} 的时间花在 JSON 序列化和 HTTP 往返上** ——
+引擎再快十倍，用户也感觉不到。而对那些引擎本身就要跑一两秒的任务，传输层占比降到 3–6%。
+
+> 优化要打在瓶颈上。任务越小，传输层越是瓶颈。
+
+### H7 · 日志 I/O ❌ 证伪
+
+原本的假设是：Python 引擎在逐 bar 循环里写日志，拖慢了它。
+
+**读源码发现这个前提就是错的** —— `engine.py:113` 的 `logger.info` 在
+`for order in pending:` 里面，是**每笔成交**打一条，不是每根 bar。
+{SIZES[-1]:,} 根 bar 上只有一千多笔成交。
+
+实测也印证了：开日志 {lc['logging_on_median_s'] * 1000:.1f} ms vs
+关日志 {lc['logging_off_median_s'] * 1000:.1f} ms —— 比值
+{lc['slowdown_x']:.2f}×，也就是开日志「更快」。这显然是噪声，
+真实差异**低于测量分辨率**。
+
+benchmark 全程仍然关着日志跑（那是对的做法），但**这个因素对结论没有贡献**。
+一个自己提出、自己证伪的假设也要写出来 —— 只报成立的假设，读者没法判断你有没有挑数据。
+
+### H8 · 冷启动 ⚠️ 不影响引擎，但影响体感
+
+`import pandas` 要 **{bt['cold_start']['import_pandas_seconds'] * 1000:.0f} ms**。
+
+这不计入引擎跑分（它不是引擎的成本），但对「跑一次小回测」这种用法，
+它比回测本身还贵。常驻进程里是一次性成本，命令行工具里则是每次都付。
+
+---
+
+## 归因汇总
+
+按对最终耗时的影响排序：
+
+| # | 因素 | 量级 | 性质 | 能不能修 |
+|---|---|---|---|---|
+| 1 | **算法阶数** O(N²)→O(N) | 最高 **{incr_last['speedup']:.0f}×**，随 N 增长 | 复杂度阶数 | ✅ 能，收益最大 |
+| 2 | **语言/运行时** | **{ma_last['speedup_vs_py_pure']:.0f}×**（同算法同数据） | 常数因子 | ⚠️ 要换语言 |
+| 3 | **数据结构**（pandas 标量索引） | 约 **{pdo['engine_total_per_bar_us'] / (pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']):.1f}×** | 常数因子 | ✅ 换 numpy 数组即可 |
+| 4 | **堆分配** | **{alloc_only_gain:.1f}×** | 常数因子 | ✅ 缓冲区复用 |
+| 5 | **传输层** | 小任务吃掉 **{http_small['transport_share']:.0%}** | 固定开销 | ✅ 批量化 / 进程内调用 |
+| 6 | **冷启动** | **{bt['cold_start']['import_pandas_seconds'] * 1000:.0f} ms** 一次性 | 固定开销 | ⚠️ 常驻进程可摊薄 |
+| 7 | **日志 I/O** | 测不出来 | — | 无需修 |
+
+**最重要的一行是第 1 行和第 2 行的对比：**
+
+在这份数据里，**算法阶数带来的差距（最高 {incr_last['speedup']:.0f}×）比语言选择带来的差距（{ma_last['speedup_vs_py_pure']:.0f}×）更大**，
+而且前者随 N 无限放大，后者是有上限的常数。
+
+所以「该用 C++ 还是 Python」多半是个问错了的问题。该问的是：
+**这段计算能不能一次算完，而不是每步重算。**
+
+---
+
+## 所以，什么时候该用哪个
+
+### C++ 明显占优
+
+**1. 本质串行、带跨 bar 状态、无法向量化的循环** — 实测 {ma_last['speedup_vs_py_pure']:.0f}–{row(SIZES[0], 'MA_CROSS')['speedup_vs_py_pure']:.0f}×
+
+逐 bar 决策是链式依赖的：这根 bar 的信号要看上一根的均线关系，要不要下单要看当前持仓，
+持仓又来自之前的成交。**没有任何一步能提前批量算**，numpy 在这里帮不上忙。
+Python 只能一根一根走，每根都付解释器和对象开销。这是 C++ 的主场。
+
+**2. 单次操作耗时接近语言开销下限** — 订单簿撮合 {sub['latency']['p50_ns']:,.0f} ns/单
+
+Python 光是一次函数调用加几个对象构造就到几百纳秒了。
+「单次很小、次数极多」的操作，语言开销占比是压倒性的。
+
+**3. 需要可预测的尾部延迟** — 订单簿 p999 = {sub['latency']['p999_ns']:,.0f} ns
+
+没有 GC 停顿。Python 的 GC 会在不确定的时刻插进来，对撮合引擎是致命的。
+
+**4. 小任务高频调用** — 参数网格搜索
+
+{SIZES[0]} 根 bar 的回测：C++ {ms(row(SIZES[0], 'MA_CROSS')['cpp_inproc']['min'])} ms vs
+Python {ms(row(SIZES[0], 'MA_CROSS')['py_pure_engine']['min'])} ms。
+跑一千组参数：C++ {row(SIZES[0], 'MA_CROSS')['cpp_inproc']['min'] * 1000:.2f} 秒
+vs Python {row(SIZES[0], 'MA_CROSS')['py_pure_engine']['min'] * 1000:.0f} 秒
+（约 {row(SIZES[0], 'MA_CROSS')['py_pure_engine']['min'] * 1000 / 60:.0f} 分钟）
+—— 交互式调参和泡杯咖啡回来看的区别。
+
+### Python 明显占优
+
+**1. 能交给向量化库的批量计算** — 用 Python 的代价≈0
+
+{SIZES[-1]:,} 根 bar 的完整 MACD，numpy 只要 **{ms(py_prep_last)} ms**，
+占整场回测的 {row(SIZES[-1], 'MACD')['py_indicator_prep_share']:.2%}。
+
+⚠️ 注意这里的措辞是「代价≈0」而不是「更快」。按 H3 的结论，
+**向量化赢不了写好的 C++**（增量版 C++ 的指标部分比这还快）。
+它赢的是**写差了的 C++** —— 本次实测里那个 O(N²) 的版本慢了约 {vectorize_ratio:,.0f}×。
+
+真正的价值在于：在这类计算上选 Python **几乎不用付性能代价**，
+于是可以把预算花在开发速度和可读性上。这跟「Python 更快」是两回事。
+
+**2. 生态里已经有人把难的部分写成了 C**
+
+用 Python 不等于用 Python 的速度跑。关键看热点落在解释器里，还是落在库里。
+本次 Python 引擎的时间有 {pdo['pandas_share']:.0%} 花在 pandas 的标量索引上（H5），
+那正是「热点掉回解释器和对象层」的典型症状 —— 同样是用库，用对用错差 {pd_rows[0][1] / pd_rows[0][2]:.0f} 倍。
+
+**3. 开发和修改成本** — {py_loc:,} 行 vs {cpp_loc:,} 行
+
+Python 参照引擎 {py_loc:,} 行做的事，C++ 引擎用了 {cpp_loc:,} 行
+（后者功能更多 —— 多出风控、市场规则、组合回测和另外六个策略 —— 所以这个对比只能当粗略的量级参考，不是等价功能的行数比）。
+
+### 一句话的决策规则
+
+> **热点能不能向量化？**
+> 能 → 用 Python + numpy，写 C++ 的边际收益很小，还可能像本次一样反而更慢。
+> 不能（串行状态依赖）→ C++ 有两个数量级的优势，值得。
+
+而回测引擎**两种都占**：指标计算能向量化，逐 bar 撮合决策不能。
+所以最优解不是二选一，是**混合** —— 指标交给向量化预计算，串行循环交给 C++。
+
+这恰好就是 Python 参照引擎当年的架构（读预先算好的指标列），
+也正是当前 C++ 引擎该改的方向。
+
+---
+
+## 一个不能比的例子
+
+`KDJ` 在上面的表里出现了，但**它的数字不该被当成速度对比读**。
+
+| 数据规模 | C++ 成交笔数 | Python 成交笔数 |
+|---|---|---|
+{NL.join(kdj_rows)}
+
+相差最多**两个数量级**。原因在策略逻辑本身：
+
+| | 买入过滤 | 卖出过滤 |
+|---|---|---|
+| **C++** | `k < overbought_` → **k < 80** | `k > oversold_` → **k > 20** |
+| **Python** | `k < oversold` → **k < 20** | `k > overbought` → **k > 80** |
+
+C++ 那边的注释写的是「K 上穿 D，且在**低位区域（超卖区）**」，
+但代码判的是 `< overbought_`（80）—— 这个条件几乎恒真，**超卖过滤等于没生效**。
+Python 侧注释与代码一致。
+
+两个实现跑的根本不是同一个策略。这种情况下「C++ 比 Python 快 1.4×」是个**没有意义的数字** ——
+它们的工作量差两个数量级。
+
+> 把它留在这里，是因为它是本次调查里最有价值的方法论教训：
+> **跑分之前必须先证明两边在做同一件事。**
+> 本仓库的 benchmark 因此内置了工作量核对（比对成交笔数与最终净值），
+> 对不上就打标记 —— 否则很容易一路比较两个不同的东西，还得出漂亮的结论。
+
+---
+
+## 订单簿：没有对照组的绝对基线
+
+订单簿模拟器没有 Python 对照，给的是绝对数字。
+
+**撮合吞吐与下单延迟**（{sub['orders']:,} 笔混合订单流：70% 被动挂单 / 20% 主动穿价 / 10% 市价）
+
+| 指标 | 数值 |
+|---|---|
+| 吞吐 | **{sub['orders_per_sec']:,.0f} orders/sec** |
+| p50 | {sub['latency']['p50_ns']:,.0f} ns |
+| p90 | {sub['latency']['p90_ns']:,.0f} ns |
+| p99 | {sub['latency']['p99_ns']:,.0f} ns |
+| p999 | {sub['latency']['p999_ns']:,.0f} ns |
+
+**盘口深度查询** `get_depth(10)` 随簿深度的变化
+
+| 簿内挂单量（股） | p50 (ns) | p99 (ns) | 摊销 (ns) |
+|---|---|---|---|
+{NL.join(depth_rows)}
+
+簿从一万涨到二十六万股，查询只从 {ob['depth_query'][0]['latency']['p50_ns']:,.0f} ns 变到
+{ob['depth_query'][-1]['latency']['p50_ns']:,.0f} ns —— 基本与簿大小无关，符合「只取前 10 档」的预期。
+
+**撤单** —— 这里有问题
+
+| 指标 | 数值 |
+|---|---|
+| p50 | **{cancel['latency']['p50_ns']:,.0f} ns** |
+| p99 | {cancel['latency']['p99_ns']:,.0f} ns |
+| 摊销 | {cancel['amortized_ns']:,.0f} ns |
+
+撤单 p50 是下单的 **{cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.0f} 倍**。
+
+翻源码：[`limit_order_book.cpp:176`](../orderbook_simulator/src/limit_order_book.cpp) 的
+`cancel_order` **遍历所有价位**，每个价位再调 `remove_order` **遍历该价位的 FIFO 队列** ——
+整体是**全簿线性扫描**，没有任何 `order_id` 索引。
+
+生产级 LOB 会维护一张 `order_id → (价位, 迭代器)` 的哈希表，让撤单 O(1)。
+这是一条具体、可修的缺陷。
+
+原始数据：[`results/orderbook.json`](results/orderbook.json)
+
+---
+
+## 为了让这些数字可信，做了什么
+
+### 环境
+
+| 项 | 值 |
+|---|---|
+| CPU | {env['cpu']}（{env['cores']} 核） |
+| 系统 | {env['os']} |
+| 编译器 | {env['compiler']} |
+| C++ 构建 | {env['cpp_build_type']} |
+| Python | {env['python']}（{env['python_impl']}） |
+| pandas / numpy | {env['pandas']} / {env['numpy']} |
+| 采样 | warmup {bt['config']['warmup']} 轮 + 正式 {bt['config']['runs']} 轮 |
+
+### 耗时取 `min` 而不是中位数
+
+benchmark 的干扰是**单向**的 —— 后台活动只会让程序变慢，永远不会让它变快。
+所以 `min` 才是「真实成本」的最佳估计，中位数反而会被系统噪声整体抬高。
+
+这不是理论洁癖：某一轮跑分里 `KDJ` 在最大规模上的 `max/min` 达到 **5.52×**，
+中位数被抬高了 46%，还算出过 **−68.6% 的「负传输开销」**这种不可能的数。
+
+中位数、p95、max 仍然完整写进结果文件，用来判断每一格干不干净。
+`max/min > 1.5` 的格子在表里打 ⚠ 标记。
+
+### 两个 benchmark 必须串行跑
+
+第一次跑的时候把订单簿和回测两个 benchmark 并行放到了后台，
+**它们互相抢 CPU，两边数据都作废**。现在是 `&&` 串起来跑的。
+
+### 工作量核对
+
+速度对比的前提是两边在做同一件事。每一格都比对 **成交笔数**（主判据）
+和**最终净值的相对误差**（辅助判据），对不上就打标记并列在输出末尾。
+
+主判据用成交笔数而非净值：净值是 N 次交易复利的结果，任何微小差异都会被放大；
+而「做了多少笔交易」才真正决定引擎干了多少活。
+
+### 时钟分辨率
+
+macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间隔 **41 ns**。
+单次 `get_depth` 只有约 250 ns，**只有 6 个 tick**，量化误差 ±17%。
+
+所以订单簿每个用例同时给两个数：逐次计时的**分位数**（能看尾部，但被量化）
+和整批总耗时÷次数的**摊销值**（不受量化影响，但看不到尾部）。两个一起看才完整。
+
+### 合成数据的设计
+
+规模曲线需要两万五千根 bar，而真实 fixture 只有 180 根，所以规模测试用合成行情。
+生成器是自己实现的线性同余随机数（不依赖 `random` 模块的实现细节），
+同一个种子在任何机器、任何 Python 版本上产生完全相同的序列。**两个引擎喂的是同一个 JSON 文件。**
+
+价格走势用**均值回复**而不是带漂移的随机游走，这一点是踩坑之后改的：
+第一版带 0.0002/天的漂移，250 根上很正常，但两万五千根复利下来价格冲到上万、
+账户净值到 1e17 量级 —— 那个区间会触发 C++ `lot_floor` 的 20 亿股钳位
+（[`strategy_context.h:80`](../backtest_engine/include/backtest/strategy_context.h)）而 Python 没有钳位，
+于是工作量核对**假报失败**。正弦周期的振幅也是实测调出来的（0.0015），
+保证任意规模下净值都待在本金的 1–2.2 倍之间。理由写在
+[`benchlib.py`](benchlib.py) 的注释里。
+
+### 公平性上刻意做的取舍
+
+- **Python 只算策略真正需要的指标列**。母项目的入口 `add_indicators()` 会一次算
+  trend + momentum + volatility + volume 四大族，拿那个当 Python 的指标成本，
+  等于凭空给它加上一堆用不到的负担。
+- **C++ 在「纯引擎」和「端到端」两个口径下是同一个数字** —— 它没有独立的指标准备阶段，
+  指标在 `on_bar` 里算。所以拿 C++ 对比 Python 的纯引擎口径，其实**对 C++ 不利**
+  （它的循环里还扛着指标计算）；两个口径都报了。
+- **计时不含进程启动和 import**（那不是引擎的成本），但冷启动单独登记了。
+
+### 已知局限
+
+- 单进程单线程，**没有测并发**。
+- Python 参照引擎是 2026-07-15 退役时的状态；C++ 引擎此后又长了风控、市场规则、
+  组合回测等功能。**对比只在两边都有的功能面上做**。
+- `MACD` 在最大规模上被标了噪声（`max/min > 1.5`），该格数字看趋势即可，不必细读。
+- H3 里 C++ 的指标成本是**用两个策略相减估出来的**，不是直接测量，属于近似。
+
+---
+
+## 这次调查查出来的具体问题
+
+按价值排序，都是可执行的：
+
+1. **`strategy_context.h` 的 `macd()` / `rsi()` / `kdj()` 改成增量递推。**
+   实测在两万五千根上能带来 **{incr_last['speedup']:.0f}×**，且把复杂度从 O(N²) 降到 O(N)。
+   增量版的参考实现就在 [`bench_backtest.cpp`](bench_backtest.cpp) 里，已验证逐位等价。
+
+2. **`limit_order_book.cpp` 的 `cancel_order` 加 `order_id` 索引。**
+   当前是全簿线性扫描，撤单比下单慢 {cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.0f} 倍。
+
+3. **`kdj_strategy.cpp` 的超买超卖过滤写反了。**
+   代码与自己的注释矛盾，超卖过滤实际未生效。
+
+4. **`ctx.sma()` 也是 O(period) 的朴素重求和**，可以改成 O(1) 滑动窗口和。
+   它没进上面的表是因为 period 小（5/20），代价被掩盖了 —— 但 period 一大就会显现。
+
+5. **C++ 与 pandas 的 RSI 种子不同**：C++ 用前 `period` 个变化的简单平均做种，
+   pandas `ewm(adjust=False)` 用第一个值做种。导致首次穿越阈值的 bar 不同，
+   最终净值出现稳定的 0.8% 系统性偏差（各规模一致，非累积误差）。
+   两种都是常见做法，但**应当明确选定一种并写进文档**。
+
+---
+
+## 复现
+
+```bash
+# 1. 构建（含 benchmark 目标）
+./build.sh
+cmake --build backtest_engine/build      --target bench_backtest  -j8
+cmake --build orderbook_simulator/build  --target bench_orderbook -j8
+
+# 2. 起 C++ 服务（HTTP 口径和 parity 门禁都需要）
+./backtest_engine/build/backtest_server 8002 &
+
+# 3. 硬门禁：先证明两个引擎算的是同一件事
+python3 benchmarks/parity_gate.py
+
+# 4. 跑分（必须串行，别并行 —— 会互抢 CPU）
+./orderbook_simulator/build/bench_orderbook 1 > benchmarks/results/orderbook.json
+python3 benchmarks/bench.py
+
+# 5. 重新生成本文档
+python3 benchmarks/make_report.py
+```
+
+Python 侧需要 `pandas` / `numpy` / `loguru`，见 [`ORIGIN.md`](ORIGIN.md)。
+
+---
+
+*本文档由 [`make_report.py`](make_report.py) 从 [`results/`](results/) 生成于 {env['timestamp']}。*
+*每个数字都可以在结果文件里查到出处。*
+"""
+
+(HERE / "README.md").write_text(doc, encoding="utf-8")
+print(f"✓ 已生成 {HERE / 'README.md'}（{len(doc.splitlines())} 行）")

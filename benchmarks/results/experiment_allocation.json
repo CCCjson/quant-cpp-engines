@@ -1,0 +1,52 @@
+[
+  {
+    "bars": 250,
+    "naive_min": 0.000463959,
+    "noalloc_min": 0.000127041,
+    "incremental_min": 4.475e-05,
+    "alloc_share_of_gain": 0.80369934805789,
+    "algo_share_of_gain": 0.19630065194210997,
+    "all_identical": true,
+    "trades": 11
+  },
+  {
+    "bars": 1000,
+    "naive_min": 0.00261825,
+    "noalloc_min": 0.001652875,
+    "incremental_min": 0.000191791,
+    "alloc_share_of_gain": 0.39785341520297685,
+    "algo_share_of_gain": 0.6021465847970232,
+    "all_identical": true,
+    "trades": 53
+  },
+  {
+    "bars": 2500,
+    "naive_min": 0.01664525,
+    "noalloc_min": 0.009596917,
+    "incremental_min": 0.00048925,
+    "alloc_share_of_gain": 0.4362672072295123,
+    "algo_share_of_gain": 0.5637327927704877,
+    "all_identical": true,
+    "trades": 147
+  },
+  {
+    "bars": 10000,
+    "naive_min": 0.275276542,
+    "noalloc_min": 0.154402958,
+    "incremental_min": 0.002258917,
+    "alloc_share_of_gain": 0.4427317979928952,
+    "algo_share_of_gain": 0.5572682020071049,
+    "all_identical": true,
+    "trades": 634
+  },
+  {
+    "bars": 25000,
+    "naive_min": 1.692332208,
+    "noalloc_min": 0.983384791,
+    "incremental_min": 0.005879916,
+    "alloc_share_of_gain": 0.4203779854093851,
+    "algo_share_of_gain": 0.5796220145906149,
+    "all_identical": true,
+    "trades": 1529
+  }
+]

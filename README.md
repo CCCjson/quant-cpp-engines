@@ -42,6 +42,7 @@
 | [`backtest_engine/`](backtest_engine/) | 事件驱动回测引擎，10 个策略实现（8 个进策略目录 + 2 个信号回放），组合回测，风控/费用/滑点建模 |
 | [`orderbook_simulator/`](orderbook_simulator/) | 限价订单簿 + 撮合引擎，四种订单类型，市场冲击估算，多会话隔离 |
 | [`examples/`](examples/) | 纯 stdlib 的 Python 演示客户端，一条命令跑通两个引擎 |
+| [`benchmarks/`](benchmarks/) | **性能调查**：C++ vs 真实 Python 参照引擎，七个假设逐一验证 + 对照实验 |
 | [`docs/`](docs/) | 原始设计文档 |
 
 ---
@@ -77,6 +78,34 @@ cmake --build orderbook_simulator/build -j8
 ```bash
 python3 examples/python_client.py
 ```
+
+---
+
+## 性能：结论不是「C++ 更快」
+
+拿一个**真实跑过生产的 Python 回测引擎**（从母项目 git 历史里取回，见
+[`benchmarks/ORIGIN.md`](benchmarks/ORIGIN.md)）做对照，在同一份数据上做了一次完整调查。
+
+起点的假设是「C++ 是编译型所以更快」。**这个假设在第一轮数据里就被证伪了**：
+
+| 策略（25,000 根 bar） | C++ vs Python |
+|---|---|
+| `MA_CROSS` | **242×** |
+| `MACD` | **0.9×** ← C++ 输了 |
+
+同一个语言、同一个引擎、同一份数据，换个策略结论就反过来。
+
+顺着查下去，真正的原因是**算法复杂度阶数**：引擎里的 `macd()`/`rsi()`/`kdj()`
+每根 bar 都从头重算整条序列（log-log 拟合斜率 k≈1.95，即 O(N²)），而 Python 侧的
+指标是 numpy 一次性算好的 O(N)。
+
+写了个逐位等价的增量版验证 —— 提速 **277×**，
+MACD 立刻回到 `MA_CROSS` 的量级，对 Python 从输 0.9× 变成赢
+248×。
+
+> **算法阶数带来的差距，比语言选择带来的差距更大** —— 前者随 N 无限放大，后者是有上限的常数。
+
+完整的七个假设验证、对照实验、方法论与已知局限：**[`benchmarks/README.md`](benchmarks/README.md)**
 
 ---
 

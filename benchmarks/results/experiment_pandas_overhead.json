@@ -1,0 +1,15 @@
+{
+  "bars": 25000,
+  "per_op_us": {
+    "engine: df.iloc[i]['close']  取当前收盘价": 10.37041874951683,
+    "engine: df.iloc[i]['open']   取成交价": 10.309862496796995,
+    "engine: df.iloc[:i+1]        切历史窗口": 7.631466700695454,
+    "strategy: df['ma5'].iloc[-1] 读指标（×4 次/bar）": 2.0772937510628253,
+    "numpy: arr_close[i]": 0.027550000231713057,
+    "numpy: arr_close[:i+1]  （视图，零拷贝）": 0.05177704733796418,
+    "numpy: arr_ma5[i]": 0.028245849534869194
+  },
+  "pandas_ops_per_bar_us": 36.62092295126058,
+  "engine_total_per_bar_us": 57.00156832113862,
+  "pandas_share": 0.6424546557200599
+}
