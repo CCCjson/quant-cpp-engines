@@ -30,6 +30,11 @@ alloc = load("experiment_allocation.json")
 pdo = load("experiment_pandas_overhead.json")
 ob = load("orderbook.json")
 parity = load("parity.json")
+py313 = load("backtest_py313.json")
+
+
+def r313(bars: int, strategy: str):
+    return next(r for r in py313["results"] if r["bars"] == bars and r["strategy"] == strategy)
 
 # Python 参照引擎的真实行数 —— 现数，不写死
 py_loc = sum(len(f.read_text(encoding="utf-8").splitlines())
@@ -160,6 +165,22 @@ parity_rows = [
     f"| {c['metric']} | {c['python']:,.8f} | {c['cpp']:,.8f} | {c['diff']:.2e} |"
     for c in parity["comparisons"]
 ]
+
+# Python 版本对照
+v_rows = []
+for st in bt["config"]["strategies"]:
+    a = row(SIZES[-1], st)["py_pure_engine"]["min"]
+    b = r313(SIZES[-1], st)["py_pure_engine"]["min"]
+    c = row(SIZES[-1], st)["cpp_inproc"]["min"]
+    v_rows.append(
+        f"| `{st}` | {ms(a)} | {ms(b)} | **{a / b:.2f}×** | {a / c:.1f}× → **{b / c:.1f}×** |")
+
+v_ma = (row(SIZES[-1], "MA_CROSS")["py_pure_engine"]["min"]
+        / r313(SIZES[-1], "MA_CROSS")["py_pure_engine"]["min"])
+v_ma_ratio_new = (r313(SIZES[-1], "MA_CROSS")["py_pure_engine"]["min"]
+                  / row(SIZES[-1], "MA_CROSS")["cpp_inproc"]["min"])
+v_macd_ratio_new = (r313(SIZES[-1], "MACD")["py_pure_engine"]["min"]
+                    / row(SIZES[-1], "MACD")["cpp_inproc"]["min"])
 
 NL = "\n"
 
@@ -432,6 +453,39 @@ benchmark 全程仍然关着日志跑（那是对的做法），但**这个因�
 
 ---
 
+## 补充：换一个 Python 版本，结论会变吗
+
+上面所有 Python 数字跑在 **{env['python']}**（母项目的 conda 环境）。
+但 Python 3.11 起解释器做过一轮大优化，只报一个版本对 Python 不公平。
+所以又用本机的 **{py313['python']}**（pandas {py313['pandas']} / numpy {py313['numpy']}）
+把 Python 侧完整重跑了一遍 —— C++ 侧不变，数据、策略、采样方式全部相同。
+
+{SIZES[-1]:,} 根 bar：
+
+| 策略 | Python {env['python']} | Python {py313['python']} | 新版快 | C++ 领先倍数变化 |
+|---|---|---|---|---|
+{NL.join(v_rows)}
+
+**Python {py313['python']} 快了约 {v_ma:.2f}×**，而且这个提速对结论有两个方向相反的影响：
+
+- **削弱**了「语言」这个因子：`MA_CROSS` 上 C++ 的领先从
+  {ma_last['speedup_vs_py_pure']:.0f}× 降到 **{v_ma_ratio_new:.0f}×**
+- **强化**了核心结论：`MACD` 上 C++ 从 {macd_last['speedup_vs_py_pure']:.1f}× 变成
+  **{v_macd_ratio_new:.2f}×** —— **输得更彻底了**
+
+在 {py313['python']} 上，C++ 在四个策略里**输掉或打平了三个** —— `MACD` {v_macd_ratio_new:.2f}×、
+`RSI` {r313(SIZES[-1], 'RSI')['py_pure_engine']['min'] / row(SIZES[-1], 'RSI')['cpp_inproc']['min']:.2f}×、
+`KDJ` {r313(SIZES[-1], 'KDJ')['py_pure_engine']['min'] / row(SIZES[-1], 'KDJ')['cpp_inproc']['min']:.2f}× ——
+只在 `MA_CROSS` 上保持领先。
+
+> 值得注意的是：「语言/运行时」这个因子本身就有 **{(v_ma - 1) * 100:.0f}% 的浮动** ——
+> 换个 Python 小版本号就变。而 O(N²)→O(N) 那 {incr_last['speedup']:.0f}× 是结构性的，不随环境漂移。
+> **这本身就是「别把语言当成主要变量」的又一个证据。**
+
+原始数据：[`results/backtest_py313.json`](results/backtest_py313.json)
+
+---
+
 ## 归因汇总
 
 按对最终耗时的影响排序：
@@ -439,7 +493,7 @@ benchmark 全程仍然关着日志跑（那是对的做法），但**这个因�
 | # | 因素 | 量级 | 性质 | 能不能修 |
 |---|---|---|---|---|
 | 1 | **算法阶数** O(N²)→O(N) | 最高 **{incr_last['speedup']:.0f}×**，随 N 增长 | 复杂度阶数 | ✅ 能，收益最大 |
-| 2 | **语言/运行时** | **{ma_last['speedup_vs_py_pure']:.0f}×**（同算法同数据） | 常数因子 | ⚠️ 要换语言 |
+| 2 | **语言/运行时** | **{v_ma_ratio_new:.0f}–{ma_last['speedup_vs_py_pure']:.0f}×**（区间来自 Python 版本差异） | 常数因子 | ⚠️ 要换语言 |
 | 3 | **数据结构**（pandas 标量索引） | 约 **{pdo['engine_total_per_bar_us'] / (pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']):.1f}×** | 常数因子 | ✅ 换 numpy 数组即可 |
 | 4 | **堆分配** | **{alloc_only_gain:.1f}×** | 常数因子 | ✅ 缓冲区复用 |
 | 5 | **传输层** | 小任务吃掉 **{http_small['transport_share']:.0%}** | 固定开销 | ✅ 批量化 / 进程内调用 |
@@ -448,8 +502,8 @@ benchmark 全程仍然关着日志跑（那是对的做法），但**这个因�
 
 **最重要的一行是第 1 行和第 2 行的对比：**
 
-在这份数据里，**算法阶数带来的差距（最高 {incr_last['speedup']:.0f}×）比语言选择带来的差距（{ma_last['speedup_vs_py_pure']:.0f}×）更大**，
-而且前者随 N 无限放大，后者是有上限的常数。
+在这份数据里，**算法阶数带来的差距（最高 {incr_last['speedup']:.0f}×）比语言选择带来的差距（{v_ma_ratio_new:.0f}–{ma_last['speedup_vs_py_pure']:.0f}×）更大**，
+而且前者随 N 无限放大、不随环境漂移，后者是有上限的常数、换个 Python 小版本就浮动 {(v_ma - 1) * 100:.0f}%。
 
 所以「该用 C++ 还是 Python」多半是个问错了的问题。该问的是：
 **这段计算能不能一次算完，而不是每步重算。**
