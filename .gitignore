@@ -1,0 +1,23 @@
+# ── 构建产物 ──
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+.cache/
+compile_commands.json
+
+# ── macOS ──
+.DS_Store
+
+# ── Python 示例 ──
+__pycache__/
+*.pyc
+.venv/
+venv/
