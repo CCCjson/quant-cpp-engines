@@ -20,7 +20,7 @@ def infer_market(symbol: Optional[str]) -> str:
            from common.market import infer_market_from_symbol
            return infer_market_from_symbol(symbol)
        —— 委托母项目的单一真源。母项目不在这里，故按原实现逐行内联，
-       语义完全一致（对照 Fin 的 common/market.py:117-134）。详见 ORIGIN.md。
+       语义完全一致（对照母项目的 common/market.py:117-134）。详见 ORIGIN.md。
 
     .SH/.SZ/.BJ = A股，.HK = 港股，.BN = 加密货币，其余（纯字母 ticker）= 美股。
     symbol 为空时兜底 a_share。
