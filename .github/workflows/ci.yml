@@ -1,0 +1,124 @@
+name: CI
+
+# 在此之前，122 个单元测试只在作者本机手跑过。
+#
+# 这个 workflow 有三个 job，价值从低到高：
+#   tests       —— 跨编译器 × 构建类型跑单元测试，防「只在我机器上能编」
+#   sanitizers  —— ASan + UBSan，抓内存错误与未定义行为
+#   parity-gate —— 证明 C++ 引擎与 Python 参照引擎算的是同一件事
+#
+# parity-gate 是这里最重要的一个。它把「两个引擎的经济结果逐位相同」
+# 从一次性的手工验证，变成每次 push 都验证的事实。性能怎么变都行，
+# 七项经济指标一位都不能变。
+
+on:
+  push:
+    branches: [main, 'harden/**']
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上新的 push 取消还在跑的旧 run，省额度
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # 单元测试：跨编译器 + 跨构建类型
+  # ────────────────────────────────────────────────────────────
+  tests:
+    name: tests · ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个格子红了，其余继续跑完——需要看到全部失败面，而不是最先失败的那一个
+      fail-fast: false
+      matrix:
+        include:
+          - { label: 'ubuntu · gcc · Release',   os: ubuntu-latest, cc: gcc,   cxx: g++,     type: Release }
+          - { label: 'ubuntu · gcc · Debug',     os: ubuntu-latest, cc: gcc,   cxx: g++,     type: Debug }
+          - { label: 'ubuntu · clang · Release', os: ubuntu-latest, cc: clang, cxx: clang++, type: Release }
+          - { label: 'macos · clang · Release',  os: macos-latest,  cc: clang, cxx: clang++, type: Release }
+
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 编译器版本
+        run: ${{ matrix.cxx }} --version
+
+      # 走 build.sh 而不是自己拼 cmake 命令：CI 要验证的是**文档里写的那条路**
+      # 能不能跑通。如果 README 让用户跑 ./build.sh，那 CI 就该跑 ./build.sh。
+      - name: 构建并跑单元测试
+        run: ./build.sh ${{ matrix.type }}
+
+  # ────────────────────────────────────────────────────────────
+  # Sanitizer：ASan + UBSan
+  # ────────────────────────────────────────────────────────────
+  sanitizers:
+    name: sanitizers · ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # -fno-sanitize-recover=all 已在 CMakeLists 里设好，所以一旦发现问题
+      # 进程直接 abort、退出码非 0，不会打一行日志继续跑然后骗过 CI
+      - name: ASan/UBSan 构建并跑测试
+        run: ./build.sh asan
+
+  # ────────────────────────────────────────────────────────────
+  # Parity 门禁：C++ 与 Python 参照引擎必须算出同一个结果
+  # ────────────────────────────────────────────────────────────
+  parity-gate:
+    name: parity gate · C++ vs Python 逐位一致
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 钉 3.10 是为了配 requirements.txt 里钉住的 pandas 2.1.4 / numpy 1.26.3
+      # （即当初产出全部跑分数据的那一组版本，见 requirements.txt 的说明）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+
+      - name: 安装 Python 参照引擎的依赖
+        run: pip install -r benchmarks/requirements.txt
+
+      - name: 构建 C++ 引擎
+        run: ./build.sh Release
+
+      - name: 起 backtest_server
+        run: |
+          ./backtest_engine/build/backtest_server 8002 > /tmp/backtest_server.log 2>&1 &
+          # 轮询等就绪，不用 sleep 猜时间
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8002/api/strategies; then
+              echo "服务器已就绪（第 $i 次探测）"; exit 0
+            fi
+            sleep 0.5
+          done
+          echo "::error::backtest_server 30 秒内没起来"
+          cat /tmp/backtest_server.log
+          exit 1
+
+      # parity_gate.py 的退出码就是门禁结论：
+      #   0 = 七项全部 0.00e+00
+      #   1 = 有项目超出容差
+      #   2 = 服务器连不上
+      - name: 跑 parity 门禁
+        run: python3 benchmarks/parity_gate.py
+
+      - name: 门禁失败时把服务器日志带出来
+        if: failure()
+        run: cat /tmp/backtest_server.log
+
+      - name: 上传 parity 结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-result
+          path: benchmarks/results/parity.json
+          if-no-files-found: warn

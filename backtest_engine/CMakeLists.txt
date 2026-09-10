@@ -26,7 +26,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)       # 必须支持 C++17，否则报错
 # 第三方代码上炸掉构建。
 add_library(backtest_flags INTERFACE)
 target_compile_options(backtest_flags INTERFACE
-    -Wall -Wextra -Werror
+    -Wall -Wextra
 
     # -ffp-contract=off：禁止把 a*b+c 收缩成一条 FMA 指令。
     #
@@ -40,6 +40,18 @@ target_compile_options(backtest_flags INTERFACE
     # 等价性论证赖以成立的东西。关掉收缩，让浮点运算序列由源码唯一确定。
     -ffp-contract=off
 )
+
+# ── 警告是否视为错误 ──
+# 默认 ON：本项目自己的代码不允许留警告。
+# 留出开关是因为不同编译器的 -Wall/-Wextra 集合并不一致——GCC 会报一些
+# clang 不报的东西（-Wmaybe-uninitialized 在 -O3 下尤其容易误报）。
+# 换编译器或换版本时如果撞上误报，可以用
+#     -DWARNINGS_AS_ERRORS=OFF
+# 临时放行，而不必把 -Wall -Wextra 一起关掉——那才是真正的损失。
+option(WARNINGS_AS_ERRORS "把编译警告视为错误" ON)
+if(WARNINGS_AS_ERRORS)
+    target_compile_options(backtest_flags INTERFACE -Werror)
+endif()
 
 # ── Sanitizer（可选）──
 # 用法：cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
