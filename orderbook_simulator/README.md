@@ -49,9 +49,43 @@ cmake --build build -j8
 | `session_manager.h` `.cpp` | 多会话隔离，`unordered_map<string, unique_ptr<Session>>` |
 | `server.h` `.cpp` | REST API 路由 |
 
-### 已知复杂度问题
+### 已知问题
 
-这两条是实测出来的，写在这里而不是藏起来：
+都是实测出来的，写在这里而不是藏起来。
+
+**0. 浮点价格被当作有序 map 的 key —— 会破坏时间优先（最严重）**
+
+订单簿是 `std::map<double, PriceLevel>`。两个代数上相等的算式给出不同的 double：
+
+```
+100.00 + 7*0.01                      = 100.06999999999999
+round((100.00 + 7*0.01)/0.01)*0.01   = 100.07000000000001   ← seed_orders 用的写法
+```
+
+于是「100.07 这一档」在簿里成了**两个不同的 key**。两个后果：
+
+- `bid_quantity_at(100.07)` 只报其中一档的量；
+- **时间优先被破坏**：同一名义价格上的两单落在不同档位，撮合按 double 大小取
+  「最优」档，于是**后到的订单可能先成交，先到的被跳过**。实测 FIRST(97股,
+  ts=1) 被跳过、SECOND(417股, ts=2) 直接吃掉 153 股。
+
+这不是精度瑕疵——上面「订单类型」一节承诺的「时间优先（同价位 FIFO）」被违反了。
+
+这个缺陷是 [`tests/test_differential.cpp`](tests/test_differential.cpp) 的随机化
+差分测试**自己发现的**（种子 12648430，300 步自动收缩到 3 步），不是人读代码读出来的。
+验收测试见 [`tests/test_price_integrity.cpp`](tests/test_price_integrity.cpp)，
+当前以 `DISABLED_` 挂着：
+
+```bash
+./build/orderbook_tests --gtest_also_run_disabled_tests --gtest_filter='PriceIntegrity*'
+```
+
+修复方向：价格改成 int64 定点的强类型，map 的 key 变整数，
+double↔定点的转换只发生在 JSON 边界。
+
+---
+
+这两条是复杂度问题：
 
 **1. `best_bid()` / `best_ask()` 不是 O(1)。**
 两个 `std::map` 取 `begin()` 确实是 O(1)，但实现要跳过已撤单的「尸体」——
