@@ -2,7 +2,7 @@
 
 限价订单簿（Limit Order Book）与撮合引擎模拟器，C++17 编写，自带 REST API 服务器（默认 `:8001`）。
 
-**3,208 行 C++ · 四种订单类型 · 40 个 GoogleTest 用例全绿 · 零编译警告**
+**约 3.2k 行 C++ · 四种订单类型 · 40 个 GoogleTest 用例全绿 · `-Wall -Wextra -Werror` 零警告**
 
 ---
 
@@ -41,13 +41,33 @@ cmake --build build -j8
 |---|---|
 | `include/orderbook/types.h` | `Side` / `OrderType` / `BookOrder` / `Fill`，纳秒时间戳与 ID 生成 |
 | `price_level.h` `.cpp` | 单价位 FIFO 订单队列——同价位先来先成交的载体 |
-| `limit_order_book.h` `.cpp` | 双向价格树：`std::map<double, PriceLevel, std::greater<>>` 存买盘（降序）、`std::map` 存卖盘（升序），取 best bid/ask 是 O(1) |
+| `limit_order_book.h` `.cpp` | 双向价格树：`std::map<double, PriceLevel, std::greater<>>` 存买盘（降序）、`std::map` 存卖盘（升序）。取 best bid/ask 是 `begin()` 起步的**跳空档扫描**，不是 O(1)——见下方「已知复杂度问题」 |
 | `matching_engine.h` `.cpp` | 撮合核心：价格优先 + 时间优先，四种订单类型各自的语义 |
 | `market_impact.h` | 市场冲击模型（平方根律）：按参与率估算大单的滑价 |
 | `statistics.h` `.cpp` | 盘口统计：价差、相对价差（bps）、深度、买卖失衡、VWAP |
 | `session.h` `.cpp` | 一次独立实验：自带订单簿 + 撮合引擎 + 成交流水，可随机播种模拟真实盘口 |
 | `session_manager.h` `.cpp` | 多会话隔离，`unordered_map<string, unique_ptr<Session>>` |
 | `server.h` `.cpp` | REST API 路由 |
+
+### 已知复杂度问题
+
+这两条是实测出来的，写在这里而不是藏起来：
+
+**1. `best_bid()` / `best_ask()` 不是 O(1)。**
+两个 `std::map` 取 `begin()` 确实是 O(1)，但实现要跳过已撤单的「尸体」——
+`remove_order` 是软撤单，只把 `is_active` 置 false，不从 deque 里移除
+（`price_level.cpp:91-101`）。所以 `best_bid()` 逐档调用 `is_empty()`，
+而 `is_empty()` 自己要扫整条 deque 才能确定有没有活跃单
+（`price_level.cpp:60-67`）。真实复杂度是 O(档数 × 档内单数)。
+
+**2. `cancel_order` 是全簿线性扫描。**
+没有 `order_id` 索引，撤单要遍历买盘所有档、再遍历卖盘所有档
+（`limit_order_book.cpp:176-190`）。实测撤单 p50 是 42,500ns，
+下单 p50 是 917ns —— **慢 46 倍**。撤一个不存在的 id 永远是最坏情况。
+
+两条都在待修列表里（加活跃单计数 + `order_id → (Side, price)` 索引）。
+在修好之前，README 不会声称它们是 O(1)。
+
 
 ## 订单类型
 

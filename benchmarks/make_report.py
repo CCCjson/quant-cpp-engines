@@ -39,11 +39,20 @@ def r313(bars: int, strategy: str):
 # Python 参照引擎的真实行数 —— 现数，不写死
 py_loc = sum(len(f.read_text(encoding="utf-8").splitlines())
              for f in sorted((HERE / "python_reference").rglob("*.py")))
-# ⛔ 必须排除 build/ —— 那里面是 FetchContent 拉下来的 googletest / httplib / json 源码，
-#    数进去会得到 15 万行这种离谱数字（踩过）。
+# ⛔ 必须排除所有构建目录 —— 里面是 FetchContent 拉下来的 googletest / httplib /
+#    json 源码，数进去会得到 15 万行这种离谱数字（踩过两次）。
+#
+#    第二次踩的原因值得记下来：原来的判据是 `"build" not in f.parts`，
+#    精确匹配名为 build 的路径段。后来加了 ASan 构建目录 build-asan/，
+#    它不叫 build，于是漏网，行数从 7,356 跳到 150,697。
+#    判据改成「任何以 build 开头的路径段」，把 build/、build-asan/、
+#    以及将来可能出现的 build-tsan/ 之类一并挡住。
+def _is_build_artifact(path) -> bool:
+    return any(part.startswith("build") for part in path.parts)
+
 cpp_loc = sum(len(f.read_text(encoding="utf-8", errors="ignore").splitlines())
               for f in sorted((HERE.parent / "backtest_engine").rglob("*"))
-              if f.suffix in {".cpp", ".h"} and "build" not in f.parts)
+              if f.suffix in {".cpp", ".h"} and not _is_build_artifact(f))
 
 env = bt["environment"]
 SIZES = bt["config"]["sizes"]

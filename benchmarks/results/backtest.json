@@ -8,8 +8,9 @@
     "pandas": "2.1.4",
     "numpy": "1.26.3",
     "compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
-    "cpp_build_type": "Release (-O2)",
-    "timestamp": "2026-08-24 13:43:52"
+    "cpp_build_type": "Release (-O3 -DNDEBUG)",
+    "timestamp": "2026-08-24 13:43:52",
+    "cpp_build_type_note": "此字段原为 bench.py 里硬编码的字符串 'Release (-O2)'，与实际构建不符（CMakeCache 显示 CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG）。已按实际值更正。bench.py 现已改为从 CMakeCache.txt 实测读取，后续跑分不再硬编码。"
   },
   "config": {
     "sizes": [

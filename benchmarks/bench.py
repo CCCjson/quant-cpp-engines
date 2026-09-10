@@ -199,6 +199,35 @@ def measure_cold_start() -> dict:
     return {"import_pandas_seconds": float(out.stdout.strip())}
 
 
+def _cpp_build_flags() -> str:
+    """
+    从 CMakeCache.txt 里读实际的构建类型与优化选项。
+
+    ⚠️ 这里原来是一个硬编码的字符串 "Release (-O2)"，而实际构建是 -O3。
+    也就是说这份结果 JSON、以及由它生成的 benchmarks/README.md 里那一行
+    环境说明，一直是错的。跑分报告里写错编译选项是很致命的一类错误——
+    它不影响数字本身，但会让所有数字失去可信度。所以改成实测。
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for build_dir in ("build", "build-asan"):
+        cache = root / "backtest_engine" / build_dir / "CMakeCache.txt"
+        if not cache.exists():
+            continue
+        btype, flags = "", ""
+        for line in cache.read_text(errors="replace").splitlines():
+            if line.startswith("CMAKE_BUILD_TYPE:"):
+                btype = line.split("=", 1)[1].strip()
+            elif line.startswith("CMAKE_CXX_FLAGS_RELEASE:") and btype.lower() == "release":
+                flags = line.split("=", 1)[1].strip()
+            elif line.startswith("CMAKE_CXX_FLAGS_DEBUG:") and btype.lower() == "debug":
+                flags = line.split("=", 1)[1].strip()
+        if btype:
+            # 本项目自己加的选项（见 backtest_engine/CMakeLists.txt）
+            own = "-Wall -Wextra -Werror -ffp-contract=off"
+            return f"{btype} ({flags}) + {own}" if flags else f"{btype} + {own}"
+    return "unknown (CMakeCache.txt not found; run ./build.sh first)"
+
+
 def environment() -> dict:
     def _cmd(args: list[str]) -> str:
         try:
@@ -217,7 +246,7 @@ def environment() -> dict:
         "pandas": pandas.__version__,
         "numpy": numpy.__version__,
         "compiler": _cmd(["c++", "--version"]).splitlines()[0] if _cmd(["c++", "--version"]) != "unknown" else "unknown",
-        "cpp_build_type": "Release (-O2)",
+        "cpp_build_type": _cpp_build_flags(),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
