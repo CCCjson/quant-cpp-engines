@@ -35,6 +35,7 @@
 #define ORDERBOOK_LIMIT_ORDER_BOOK_H
 
 #include <map>
+#include <unordered_map>
 #include <optional>    // std::optional — 表示"可能没有值"
 #include <vector>
 #include <string>
@@ -156,6 +157,37 @@ private:
     //   101.50 → PriceLevel(101.50)
     //   102.00 → PriceLevel(102.00)
     std::map<double, PriceLevel> asks_;
+
+    /*
+     * ── order_id → 所在档位 的索引 ──
+     *
+     * 撤单原来是全簿线性扫描：遍历买盘每一档、每档再遍历整条 deque，
+     * 找不到再遍历卖盘。实测撤单 p50 = 42,209ns 而下单 p50 = 834ns —— 慢 50 倍，
+     * 而且撤一个不存在的 id 永远是最坏情况（两边都扫完）。
+     *
+     * 有了这个索引，撤单变成一次哈希查找 + 该档内的短扫描。
+     *
+     * ⚠️ 关于陈旧条目的设计取舍（重要）：
+     *
+     * 撮合是 MatchingEngine 直接拿 best_*_level() 返回的指针调
+     * PriceLevel::match 完成的，LimitOrderBook 看不到。所以成交离场的订单
+     * 由 match 的 retired_ids 输出参数报出、再由调用方交给 retire_orders()
+     * 清理（matching_engine 已这么做）。
+     *
+     * 但**正确性不依赖这条清理链**：万一将来有新代码路径忘了调
+     * retire_orders()，索引里会留下陈旧条目，此时 cancel_order 会按索引找到
+     * 那个档、调 remove_order 找不到活跃单、返回 false —— 而 false 正是
+     * 「撤一个已成交订单」的正确答案。忘记清理只会让索引变大，不会让行为出错。
+     * 这个性质是刻意设计的：让容易忘的事只影响内存，不影响语义。
+     */
+    std::unordered_map<std::string, std::pair<Side, double>> index_;
+
+public:
+    /// 把这些 order_id 从索引里移除（它们已因全部成交而离开簿）
+    ///
+    /// 由撮合方在调用 PriceLevel::match 之后传入 retired_ids 调用。
+    /// 见上面 index_ 的注释：漏调只会让索引变大，不会导致撤单行为出错。
+    void retire_orders(const std::vector<std::string>& ids);
 };
 
 }  // namespace orderbook

@@ -33,37 +33,20 @@ double PriceLevel::price() const {
 }
 
 int PriceLevel::total_quantity() const {
-    int total = 0;
-    // 范围 for 循环（C++11 引入），遍历 orders_ 里的每个元素
-    // const auto& 的含义：
-    //   auto  = 让编译器自动推断类型（这里是 BookOrder）
-    //   &     = 引用，不拷贝（高效）
-    //   const = 不修改（只读）
-    for (const auto& order : orders_) {
-        if (order.is_active) {
-            total += order.remaining();
-        }
-    }
-    return total;
+    // O(1)：直接返回增量维护的计数器（不变量见头文件）
+    return static_cast<int>(active_quantity_);
 }
 
 int PriceLevel::order_count() const {
-    int count = 0;
-    for (const auto& order : orders_) {
-        if (order.is_active) {
-            count++;
-        }
-    }
-    return count;
+    // O(1)：同上
+    return active_count_;
 }
 
 bool PriceLevel::is_empty() const {
-    // 如果没有任何活跃订单，就认为是空的
-    // 队列里可能有已取消/已成交的"尸体"，但它们不算
-    for (const auto& order : orders_) {
-        if (order.is_active) return false;
-    }
-    return true;
+    // O(1)。原来要扫过队列里已撤单/已成交的「尸体」才能判断，
+    // 而这个方法被 best_bid()/best_ask()/get_depth()/cleanup() 反复调用，
+    // 是「取 best bid/ask 并非 O(1)」的根源。
+    return active_count_ == 0;
 }
 
 std::vector<BookOrder> PriceLevel::get_orders() const {
@@ -82,9 +65,12 @@ std::vector<BookOrder> PriceLevel::get_orders() const {
 // ============================================================
 
 void PriceLevel::add_order(BookOrder order) {
+    // 先更新聚合量，再移动（移动之后 order 就是空壳了，读不到字段）
+    if (order.is_active && order.remaining() > 0) {
+        active_count_ += 1;
+        active_quantity_ += order.remaining();
+    }
     // std::move 把 order 的内容"转移"给 deque，而不是拷贝
-    // 转移后 order 变成"空壳"，但我们不再需要它了
-    // 这避免了一次不必要的深拷贝（特别是 string 类型的拷贝开销）
     orders_.push_back(std::move(order));
 }
 
@@ -93,7 +79,13 @@ bool PriceLevel::remove_order(const std::string& order_id) {
     for (auto& order : orders_) {
         // 注意这里用 auto&（没有 const），因为我们要修改 order
         if (order.order_id == order_id && order.is_active) {
+            // 软撤单：置 is_active=false，不从队列里移除（尸体留到 match/cleanup 清）
+            const int rem = order.remaining();
             order.cancel();
+            if (rem > 0) {
+                active_count_ -= 1;
+                active_quantity_ -= rem;
+            }
             return true;    // 找到了，撤销成功
         }
     }
@@ -103,7 +95,8 @@ bool PriceLevel::remove_order(const std::string& order_id) {
 std::pair<int, std::vector<Fill>> PriceLevel::match(
     int incoming_qty,
     Side aggressor_side,
-    const std::string& aggressor_order_id
+    const std::string& aggressor_order_id,
+    std::vector<std::string>* retired_ids
 ) {
     // std::pair 是"一对值"的容器，相当于 Python 的 tuple(a, b)
     // 这里返回 (实际成交量, 成交记录列表)
@@ -119,6 +112,9 @@ std::pair<int, std::vector<Fill>> PriceLevel::match(
 
         // 跳过已经不活跃的订单（已撤单或已成交的"尸体"）
         if (!resting.is_active) {
+            // 尸体不计入 active_count_/active_quantity_（撤单或成交时已扣过），
+            // 所以这里只需出队，不动计数器。
+            if (retired_ids) retired_ids->push_back(resting.order_id);
             orders_.pop_front();   // pop_front = 弹出队列最前面的元素
             continue;
         }
@@ -130,6 +126,8 @@ std::pair<int, std::vector<Fill>> PriceLevel::match(
         // 让挂单记录成交
         resting.fill(trade_qty);
         matched += trade_qty;
+        // 成交掉的量从该档的活跃总量里扣掉
+        active_quantity_ -= trade_qty;
 
         // 创建成交记录
         Fill fill;
@@ -152,6 +150,10 @@ std::pair<int, std::vector<Fill>> PriceLevel::match(
 
         // 如果这个挂单已经全部成交了，从队列中移除
         if (resting.is_filled()) {
+            // fill() 内部在成交满时已把 is_active 置 false，
+            // 这里把它从活跃单计数里去掉，并告知调用方该 id 已离开簿。
+            active_count_ -= 1;
+            if (retired_ids) retired_ids->push_back(resting.order_id);
             orders_.pop_front();
         }
     }

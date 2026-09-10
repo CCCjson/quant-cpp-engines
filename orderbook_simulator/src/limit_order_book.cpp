@@ -146,6 +146,12 @@ void LimitOrderBook::add_order(BookOrder order) {
     double price = order.price;
     Side side = order.side;
 
+    // 登记到 order_id 索引，供 O(1) 撤单用。
+    // 注意存的是 double 价格本身而不是「第几档」—— 因为 map 的 key 就是它，
+    // 后面 find(price) 必须用完全相同的位模式才能命中。
+    // （这也正是浮点键那个已知缺陷的另一面，见 README「已知问题」第 0 条。）
+    index_[order.order_id] = {side, price};
+
     if (side == Side::BUY) {
         // 在买盘中查找该价位
         auto it = bids_.find(price);
@@ -174,19 +180,53 @@ void LimitOrderBook::add_order(BookOrder order) {
 }
 
 bool LimitOrderBook::cancel_order(const std::string& order_id) {
-    // 先在买盘里找
-    for (auto& [price, level] : bids_) {
-        if (level.remove_order(order_id)) {
-            return true;
+    /*
+     * 一次哈希查找定位到档位，再在该档内做短扫描。
+     *
+     * 原来是全簿线性扫描：遍历买盘每一档、每档再遍历整条 deque，找不到再遍历
+     * 卖盘。实测撤单 p50 = 42,209ns 而下单 p50 = 834ns —— 慢 50 倍；
+     * 且撤一个不存在的 id 永远是最坏情况（两边都扫完）。
+     */
+    auto hit = index_.find(order_id);
+    if (hit == index_.end()) {
+        return false;   // 从没见过这个 id
+    }
+
+    const auto [side, price] = hit->second;
+
+    /*
+     * 撤完之后如果该档空了，就地把这一档删掉（O(log n)），而不是留给 cleanup()。
+     *
+     * 为什么在意：best_bid()/best_ask() 是从 begin() 起跳过空档往下找。
+     * cleanup() 只在提交订单时被调用，撤单不调；如果撤单留下空档，
+     * 那么在下一次提交之前，best_bid() 就要跳过这些空壳 ——
+     * 虽然每次 is_empty() 现在是 O(1)，但档数一多仍然不是 O(1)。
+     * 就地删掉这一档，best_bid()/best_ask() 才真正是 O(1)。
+     */
+    bool removed = false;
+    if (side == Side::BUY) {
+        auto it = bids_.find(price);
+        if (it != bids_.end()) {
+            removed = it->second.remove_order(order_id);
+            if (it->second.is_empty()) bids_.erase(it);
+        }
+    } else {
+        auto it = asks_.find(price);
+        if (it != asks_.end()) {
+            removed = it->second.remove_order(order_id);
+            if (it->second.is_empty()) asks_.erase(it);
         }
     }
-    // 再在卖盘里找
-    for (auto& [price, level] : asks_) {
-        if (level.remove_order(order_id)) {
-            return true;
-        }
-    }
-    return false;
+
+    // 无论撤成功与否，这个 id 都不再需要留在索引里：
+    //   撤成功 → 订单已失活，不会再被撤第二次
+    //   撤失败 → 说明它已成交离场（陈旧条目），正好顺手清掉
+    index_.erase(hit);
+    return removed;
+}
+
+void LimitOrderBook::retire_orders(const std::vector<std::string>& ids) {
+    for (const auto& id : ids) index_.erase(id);
 }
 
 PriceLevel* LimitOrderBook::best_bid_level() {
@@ -211,6 +251,10 @@ PriceLevel* LimitOrderBook::best_ask_level() {
 
 void LimitOrderBook::cleanup() {
     // 删除空的价位，释放内存
+    //
+    // 这里不动 index_：被销毁的档位里只剩已撤单/已成交的尸体，它们的索引条目
+    // 要么已在 cancel_order/retire_orders 里清掉，要么是无害的陈旧条目
+    // （见 limit_order_book.h 里 index_ 的注释）。
     // 使用 erase-remove 惯用法
 
     // 遍历买盘，删除空价位

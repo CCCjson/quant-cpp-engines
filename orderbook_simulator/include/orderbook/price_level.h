@@ -48,12 +48,23 @@ public:
     double price() const;
 
     /// 该价位上所有活跃订单的总量
+    ///
+    /// O(1)：由增量维护的计数器直接返回。
+    /// 原来是每次调用都遍历整条 deque 求和——而 get_depth 对每档要调
+    /// total_quantity() + order_count() 两次，再加 is_empty()，
+    /// 一次取盘口就把整个簿扫了好几遍。
     int total_quantity() const;
 
-    /// 该价位上有多少个活跃订单
+    /// 该价位上有多少个活跃订单（O(1)）
     int order_count() const;
 
     /// 是否没有活跃订单了
+    ///
+    /// O(1)。这一条尤其要紧：is_empty() 被 best_bid()/best_ask()/get_depth()/
+    /// best_bid_level()/best_ask_level()/cleanup() 全都调用，而它原来是 O(n)
+    /// ——因为撤单是软撤单（只置 is_active=false，不出队），必须扫过队列里的
+    /// 「尸体」才能确定还有没有活跃单。这就是 README 原先声称
+    /// 「取 best bid/ask 是 O(1)」却不成立的原因。
     bool is_empty() const;
 
     /// 获取所有活跃订单的列表（返回拷贝，不影响内部状态）
@@ -77,15 +88,36 @@ public:
     /// 返回值：
     ///   pair.first  — 实际成交了多少股
     ///   pair.second — 成交记录列表
+    /// 　　retired_ids — 可选的输出参数。本次撮合中**彻底离开簿**
+    ///                   （全部成交）的挂单 id 会追加到这里。
+    ///                   LimitOrderBook 用它把 order_id 索引里的条目清掉，
+    ///                   否则索引会随着成交单不断累积陈旧条目。
+    ///                   传 nullptr 表示不关心（现存测试就是这么调的）。
     std::pair<int, std::vector<Fill>> match(
         int incoming_qty,
         Side aggressor_side,
-        const std::string& aggressor_order_id
+        const std::string& aggressor_order_id,
+        std::vector<std::string>* retired_ids = nullptr
     );
 
 private:
     double price_;                     // 这个价位的价格
     std::deque<BookOrder> orders_;     // 订单队列（FIFO）
+
+    /*
+     * ── 增量维护的聚合量 ──
+     *
+     * 这两个计数器把 is_empty()/order_count()/total_quantity() 从 O(n) 变成 O(1)。
+     *
+     * 不变量（每次修改队列后都必须成立，差分测试会验证）：
+     *   active_count_    == 队列中 is_active && remaining() > 0 的订单数
+     *   active_quantity_ == 上述订单的 remaining() 之和
+     *
+     * 之所以能安全地缓存，是因为队列的每一处改动都收在本类的四个方法里：
+     * add_order / remove_order / match / （构造）。外部拿不到可写的队列引用。
+     */
+    int active_count_ = 0;
+    long long active_quantity_ = 0;
 
     // 命名约定：成员变量以下划线结尾（price_、orders_）
     // 这是 Google C++ 代码风格的惯例，方便区分成员变量和局部变量

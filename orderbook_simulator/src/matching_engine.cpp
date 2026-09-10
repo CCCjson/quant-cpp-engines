@@ -178,6 +178,13 @@ std::vector<Fill> MatchingEngine::match_against_book(
 
     std::vector<Fill> fills;
 
+    // 本轮撮合中因全部成交而离场的挂单 id。
+    // 撮合是直接拿 best_*_level() 的指针调 PriceLevel::match 做的，
+    // LimitOrderBook 看不到，所以要在这里收集、循环结束后交还给它清索引。
+    // （漏掉不会导致行为错误，只会让索引留下陈旧条目 ——
+    //   见 limit_order_book.h 里 index_ 的注释。）
+    std::vector<std::string> retired;
+
     while (order.remaining() > 0) {
         PriceLevel* best_level = nullptr;
 
@@ -205,7 +212,8 @@ std::vector<Fill> MatchingEngine::match_against_book(
         auto [matched, level_fills] = best_level->match(
             order.remaining(),
             order.side,
-            order.order_id
+            order.order_id,
+            &retired
         );
 
         // 更新来单的成交数量
@@ -223,6 +231,7 @@ std::vector<Fill> MatchingEngine::match_against_book(
         // 如果这个价位被吃空了，会在后续 cleanup 中移除
     }
 
+    book.retire_orders(retired);
     return fills;
 }
 

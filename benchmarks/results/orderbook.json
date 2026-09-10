@@ -1,95 +1,95 @@
 {
   "cancel": {
-    "amortized_ns": 45326.19,
+    "amortized_ns": 148.35584,
     "cancelled_ok": 50000,
     "latency": {
-      "max_ns": 248792.0,
-      "mean_ns": 45309.88194,
-      "p50_ns": 42500.0,
-      "p90_ns": 85542.0,
-      "p999_ns": 109708.0,
-      "p99_ns": 98916.0
+      "max_ns": 9084.0,
+      "mean_ns": 91.7753,
+      "p50_ns": 84.0,
+      "p90_ns": 167.0,
+      "p999_ns": 584.0,
+      "p99_ns": 292.0
     },
     "orders": 50000
   },
   "depth_query": [
     {
-      "amortized_ns": 234.6521,
-      "ask_depth": 6317,
-      "bid_depth": 6594,
+      "amortized_ns": 157.9604,
+      "ask_depth": 4233,
+      "bid_depth": 7538,
       "book_size_requested": 1000,
       "latency": {
-        "max_ns": 5083.0,
-        "mean_ns": 264.7269,
-        "p50_ns": 250.0,
-        "p90_ns": 292.0,
-        "p999_ns": 459.0,
-        "p99_ns": 292.0
+        "max_ns": 3834.0,
+        "mean_ns": 137.018,
+        "p50_ns": 126.0,
+        "p90_ns": 168.0,
+        "p999_ns": 334.0,
+        "p99_ns": 209.0
       },
       "queries": 20000
     },
     {
-      "amortized_ns": 261.8979,
-      "ask_depth": 14967,
-      "bid_depth": 12310,
+      "amortized_ns": 163.33125,
+      "ask_depth": 15110,
+      "bid_depth": 17696,
       "book_size_requested": 10000,
       "latency": {
-        "max_ns": 16000.0,
-        "mean_ns": 243.49335,
-        "p50_ns": 250.0,
-        "p90_ns": 250.0,
-        "p999_ns": 334.0,
-        "p99_ns": 292.0
+        "max_ns": 18793.0,
+        "mean_ns": 113.48225,
+        "p50_ns": 125.0,
+        "p90_ns": 126.0,
+        "p999_ns": 251.0,
+        "p99_ns": 168.0
       },
       "queries": 20000
     },
     {
-      "amortized_ns": 588.57915,
-      "ask_depth": 144353,
-      "bid_depth": 131726,
+      "amortized_ns": 161.87705,
+      "ask_depth": 132822,
+      "bid_depth": 131207,
       "book_size_requested": 100000,
       "latency": {
-        "max_ns": 2917.0,
-        "mean_ns": 584.99255,
-        "p50_ns": 583.0,
-        "p90_ns": 625.0,
-        "p999_ns": 750.0,
-        "p99_ns": 667.0
+        "max_ns": 13084.0,
+        "mean_ns": 106.1244,
+        "p50_ns": 125.0,
+        "p90_ns": 126.0,
+        "p999_ns": 209.0,
+        "p99_ns": 126.0
       },
       "queries": 20000
     }
   ],
   "submit": [
     {
-      "book_orders_after": 422238,
-      "filled_quantity_total": 6186778,
+      "book_orders_after": 393824,
+      "filled_quantity_total": 6176535,
       "latency": {
-        "max_ns": 195125.0,
-        "mean_ns": 1081.00844,
-        "p50_ns": 1000.0,
-        "p90_ns": 1250.0,
-        "p999_ns": 10708.0,
-        "p99_ns": 2125.0
+        "max_ns": 423542.0,
+        "mean_ns": 1152.6048,
+        "p50_ns": 1001.0,
+        "p90_ns": 1584.0,
+        "p999_ns": 5126.0,
+        "p99_ns": 2543.0
       },
       "orders": 50000,
-      "orders_per_sec": 887438.097199249,
-      "wall_seconds": 0.056341958
+      "orders_per_sec": 802793.7221530929,
+      "wall_seconds": 0.0622825
     },
     {
-      "book_orders_after": 821049,
-      "filled_quantity_total": 24387752,
+      "book_orders_after": 833761,
+      "filled_quantity_total": 24396385,
       "latency": {
-        "max_ns": 688125.0,
-        "mean_ns": 972.76804,
-        "p50_ns": 917.0,
-        "p90_ns": 1125.0,
-        "p999_ns": 2209.0,
-        "p99_ns": 1459.0
+        "max_ns": 1340250.0,
+        "mean_ns": 709.178285,
+        "p50_ns": 626.0,
+        "p90_ns": 875.0,
+        "p999_ns": 2917.0,
+        "p99_ns": 1334.0
       },
       "orders": 200000,
-      "orders_per_sec": 989556.2676809275,
-      "wall_seconds": 0.202110791
+      "orders_per_sec": 1277724.2851407335,
+      "wall_seconds": 0.156528292
     }
   ],
-  "timer_overhead_ns": 0.0
+  "timer_overhead_ns": 41.0
 }

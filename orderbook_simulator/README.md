@@ -41,7 +41,7 @@ cmake --build build -j8
 |---|---|
 | `include/orderbook/types.h` | `Side` / `OrderType` / `BookOrder` / `Fill`，纳秒时间戳与 ID 生成 |
 | `price_level.h` `.cpp` | 单价位 FIFO 订单队列——同价位先来先成交的载体 |
-| `limit_order_book.h` `.cpp` | 双向价格树：`std::map<double, PriceLevel, std::greater<>>` 存买盘（降序）、`std::map` 存卖盘（升序）。取 best bid/ask 是 `begin()` 起步的**跳空档扫描**，不是 O(1)——见下方「已知复杂度问题」 |
+| `limit_order_book.h` `.cpp` | 双向价格树：`std::map<double, PriceLevel, std::greater<>>` 存买盘（降序）、`std::map` 存卖盘（升序）。取 best bid/ask 是 O(1)（`begin()` + O(1) 的空档判断，且撤单会就地删掉空档） |
 | `matching_engine.h` `.cpp` | 撮合核心：价格优先 + 时间优先，四种订单类型各自的语义 |
 | `market_impact.h` | 市场冲击模型（平方根律）：按参与率估算大单的滑价 |
 | `statistics.h` `.cpp` | 盘口统计：价差、相对价差（bps）、深度、买卖失衡、VWAP |
@@ -85,22 +85,50 @@ double↔定点的转换只发生在 JSON 边界。
 
 ---
 
-这两条是复杂度问题：
+### 已修复：两处复杂度问题
 
-**1. `best_bid()` / `best_ask()` 不是 O(1)。**
-两个 `std::map` 取 `begin()` 确实是 O(1)，但实现要跳过已撤单的「尸体」——
-`remove_order` 是软撤单，只把 `is_active` 置 false，不从 deque 里移除
-（`price_level.cpp:91-101`）。所以 `best_bid()` 逐档调用 `is_empty()`，
-而 `is_empty()` 自己要扫整条 deque 才能确定有没有活跃单
-（`price_level.cpp:60-67`）。真实复杂度是 O(档数 × 档内单数)。
+这两条原本也在「已知问题」里，现在修掉了。留着记录，因为过程比结论有意思。
 
-**2. `cancel_order` 是全簿线性扫描。**
-没有 `order_id` 索引，撤单要遍历买盘所有档、再遍历卖盘所有档
-（`limit_order_book.cpp:176-190`）。实测撤单 p50 是 42,500ns，
-下单 p50 是 917ns —— **慢 46 倍**。撤一个不存在的 id 永远是最坏情况。
+**1. `cancel_order` 原来是全簿线性扫描。**
 
-两条都在待修列表里（加活跃单计数 + `order_id → (Side, price)` 索引）。
-在修好之前，README 不会声称它们是 O(1)。
+没有 `order_id` 索引，撤单要遍历买盘所有档、每档再遍历整条 FIFO 队列，
+找不到再遍历卖盘。撤一个不存在的 id 永远是最坏情况——两边都扫完。
+
+改法是生产级 LOB 的标准做法：一张 `order_id → (方向, 价位)` 的哈希表。
+
+| 指标 | 改前 | 改后 | 变化 |
+|---|---|---|---|
+| 撤单 p50 | 42,209 ns | **84 ns** | **502×** |
+| 撤单 p99 | 99,709 ns | 292 ns | 341× |
+| 撤单 p99.9 | 133,250 ns | 584 ns | 228× |
+| 撤单 / 下单 p50 | 50.6× | 0.13× | —— |
+
+**2. `is_empty()` / `order_count()` / `total_quantity()` 原来都是 O(n)。**
+
+因为撤单是软撤单（只置 `is_active=false`，不出队），这三个方法必须扫过队列里的
+「尸体」才能得出答案。而 `is_empty()` 被 `best_bid()`、`best_ask()`、`get_depth()`、
+`cleanup()` 全都调用——这就是本 README 原先声称「取 best bid/ask 是 O(1)」
+却不成立的原因。
+
+改成两个增量维护的计数器（活跃单数、活跃总量）之后：
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| `get_depth(10)` p50 @ 簿深 1,000 | 209 ns | 126 ns |
+| `get_depth(10)` p50 @ 簿深 10,000 | 209 ns | 125 ns |
+| `get_depth(10)` p50 @ 簿深 100,000 | 501 ns | 125 ns |
+| 下单 p50 | 834 ns | 626 ns |
+
+重点不在常数变小，在**阶数变了**：改前 `get_depth` 随簿深从 209 涨到 501 ns，
+改后基本不随簿深变化。
+
+下单也变快了，尽管它多了一次索引插入——因为每次提交都会调 `cleanup()`，
+而 `cleanup()` 要对每档调 `is_empty()`，省下的比新增的多。
+
+**两处改动的行为等价由随机化差分测试守着**
+（[`tests/test_differential.cpp`](tests/test_differential.cpp)，
+200 个种子 × 300 步 = 6 万次操作，与参照模型逐笔一致）。
+先有护栏、再改性能，顺序不能反。
 
 
 ## 订单类型

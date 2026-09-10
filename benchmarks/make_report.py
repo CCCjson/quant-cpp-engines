@@ -162,6 +162,11 @@ depth_rows = [
     for q in ob["depth_query"]
 ]
 cancel = ob["cancel"]
+# 加 order_id 索引之前的基线，用来给出 before/after 对照
+ob_before = load("orderbook_before_cancel_index.json")
+cancel_before = ob_before["cancel"]
+sub_before = ob_before["submit"][-1]
+depth_before = ob_before["depth_query"]
 
 # KDJ 工作量分歧
 kdj_rows = [
@@ -638,24 +643,48 @@ Python 侧注释与代码一致。
 簿从一万涨到二十六万股，查询只从 {ob['depth_query'][0]['latency']['p50_ns']:,.0f} ns 变到
 {ob['depth_query'][-1]['latency']['p50_ns']:,.0f} ns —— 基本与簿大小无关，符合「只取前 10 档」的预期。
 
-**撤单** —— 这里有问题
+**撤单** —— 发现问题，然后修掉了
 
-| 指标 | 数值 |
-|---|---|
-| p50 | **{cancel['latency']['p50_ns']:,.0f} ns** |
-| p99 | {cancel['latency']['p99_ns']:,.0f} ns |
-| 摊销 | {cancel['amortized_ns']:,.0f} ns |
+最初这里是全簿线性扫描：[`cancel_order`](../orderbook_simulator/src/limit_order_book.cpp)
+遍历买盘每一档、每档再遍历整条 FIFO 队列，找不到再遍历卖盘。没有任何 `order_id` 索引。
+撤一个不存在的 id 永远是最坏情况——两边都扫完。
 
-撤单 p50 是下单的 **{cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.0f} 倍**。
+| 指标 | 加索引前 | 加索引后 | 变化 |
+|---|---|---|---|
+| p50 | {cancel_before['latency']['p50_ns']:,.0f} ns | **{cancel['latency']['p50_ns']:,.0f} ns** | **{cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}×** |
+| p99 | {cancel_before['latency']['p99_ns']:,.0f} ns | {cancel['latency']['p99_ns']:,.0f} ns | {cancel_before['latency']['p99_ns'] / cancel['latency']['p99_ns']:.0f}× |
+| p99.9 | {cancel_before['latency']['p999_ns']:,.0f} ns | {cancel['latency']['p999_ns']:,.0f} ns | {cancel_before['latency']['p999_ns'] / cancel['latency']['p999_ns']:.0f}× |
+| 撤单/下单 p50 | {cancel_before['latency']['p50_ns'] / sub_before['latency']['p50_ns']:.1f}× | {cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.2f}× | —— |
 
-翻源码：[`limit_order_book.cpp:176`](../orderbook_simulator/src/limit_order_book.cpp) 的
-`cancel_order` **遍历所有价位**，每个价位再调 `remove_order` **遍历该价位的 FIFO 队列** ——
-整体是**全簿线性扫描**，没有任何 `order_id` 索引。
+改动是生产级 LOB 的标准做法：一张 `order_id → (方向, 价位)` 的哈希表，
+撤单变成一次哈希查找加该档内的短扫描。
 
-生产级 LOB 会维护一张 `order_id → (价位, 迭代器)` 的哈希表，让撤单 O(1)。
-这是一条具体、可修的缺陷。
+**同时做的另一件事，收益出乎意料。** `PriceLevel` 原来的
+`is_empty()` / `order_count()` / `total_quantity()` 都是 O(n) —— 因为撤单是软撤单
+（只置 `is_active=false`，不出队），必须扫过队列里的「尸体」才能判断。改成用两个
+增量维护的计数器之后：
 
-原始数据：[`results/orderbook.json`](results/orderbook.json)
+| 指标 | 加索引前 | 加索引后 |
+|---|---|---|
+| `get_depth(10)` p50 @ 簿深 1,000 | {depth_before[0]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][0]['latency']['p50_ns']:,.0f} ns |
+| `get_depth(10)` p50 @ 簿深 10,000 | {depth_before[1]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][1]['latency']['p50_ns']:,.0f} ns |
+| `get_depth(10)` p50 @ 簿深 100,000 | {depth_before[2]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][2]['latency']['p50_ns']:,.0f} ns |
+| 下单 p50 | {sub_before['latency']['p50_ns']:,.0f} ns | {sub['latency']['p50_ns']:,.0f} ns |
+
+注意 `get_depth` 那三行：改之前随簿深从 {depth_before[0]['latency']['p50_ns']:,.0f} 涨到
+{depth_before[2]['latency']['p50_ns']:,.0f} ns，改之后**基本不随簿深变化**了。
+这才是这次改动的实质——不是常数变小，是复杂度阶数变了。
+
+**下单也变快了**，尽管它多了一次索引插入。原因是每次提交订单都会调 `cleanup()`，
+而 `cleanup()` 要对每一档调 `is_empty()`；`is_empty()` 从 O(n) 变 O(1) 之后，
+省下的比索引插入的开销更多。
+
+行为等价由 [`test_differential.cpp`](../orderbook_simulator/tests/test_differential.cpp)
+的随机化差分测试守着：200 个种子 × 300 步 = 6 万次操作，与参照模型逐笔一致。
+先有护栏再改性能，顺序不能反。
+
+原始数据：[`results/orderbook.json`](results/orderbook.json)（改后）·
+[`results/orderbook_before_cancel_index.json`](results/orderbook_before_cancel_index.json)（改前基线）
 
 ---
 
@@ -747,8 +776,11 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
    实测在两万五千根上能带来 **{incr_last['speedup']:.0f}×**，且把复杂度从 O(N²) 降到 O(N)。
    增量版的参考实现就在 [`bench_backtest.cpp`](bench_backtest.cpp) 里，已验证逐位等价。
 
-2. **`limit_order_book.cpp` 的 `cancel_order` 加 `order_id` 索引。**
-   当前是全簿线性扫描，撤单比下单慢 {cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.0f} 倍。
+2. ~~**`limit_order_book.cpp` 的 `cancel_order` 加 `order_id` 索引。**~~
+   ✅ **已完成。** 撤单 p50 从 {cancel_before['latency']['p50_ns']:,.0f} ns 降到
+   {cancel['latency']['p50_ns']:,.0f} ns（**{cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}×**），
+   顺带把 `PriceLevel` 的聚合量改成增量维护，`get_depth` 不再随簿深增长。
+   详见上面「订单簿」一节。
 
 3. **`kdj_strategy.cpp` 的超买超卖过滤写反了。**
    代码与自己的注释矛盾，超卖过滤实际未生效。
