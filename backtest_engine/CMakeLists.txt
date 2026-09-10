@@ -165,6 +165,21 @@ if(EXISTS ${BENCH_SRC})
     )
 endif()
 
+# ── 指标金标准生成器 ──
+# 一次性工具：把当前实现算出的每根 bar 的指标值导出成 fixture，产物提交进仓库。
+# 单独一个 target 而不是给测试加 --regen 开关，是刻意的：
+# 测试**不应该**有能力覆写自己的期望值，否则「测试通过」随时可以靠重新生成
+# 期望值来达成，金标准就失去意义了。
+add_executable(indicator_golden_gen tests/gen_indicator_golden.cpp ${LIB_SOURCES})
+target_compile_definitions(indicator_golden_gen PRIVATE
+    GOLDEN_BARS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../benchmarks/data/cpp_bars.json"
+)
+target_link_libraries(indicator_golden_gen PRIVATE
+    backtest_flags
+    nlohmann_json::nlohmann_json
+    httplib::httplib
+)
+
 # ── 测试程序 ──
 enable_testing()   # 启用 CMake 的测试功能
 
@@ -177,11 +192,18 @@ set(TEST_SOURCES
     tests/test_external_signal.cpp
     tests/test_portfolio_engine.cpp
     tests/test_pairs_strategy.cpp
+    tests/test_indicator_golden.cpp
 )
 
 add_executable(backtest_tests
     ${TEST_SOURCES}
     ${LIB_SOURCES}
+)
+
+# 金标准 fixture 与真实日线的路径由构建系统注入，测试不依赖运行时 cwd
+target_compile_definitions(backtest_tests PRIVATE
+    GOLDEN_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/indicator_golden.json"
+    GOLDEN_BARS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../benchmarks/data/cpp_bars.json"
 )
 
 target_link_libraries(backtest_tests PRIVATE
