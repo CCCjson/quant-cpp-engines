@@ -219,7 +219,7 @@ Metrics::MaxDrawdown Metrics::calc_max_drawdown(const std::vector<EquitySnapshot
 
     double peak = curve[0].total_value;
     int peak_idx = 0;
-    int trough_idx = 0;
+    // 谷底不需要单独记索引：下面直接用 curve[i].date 就是谷底当天。
 
     for (size_t i = 1; i < curve.size(); ++i) {
         double value = curve[i].total_value;

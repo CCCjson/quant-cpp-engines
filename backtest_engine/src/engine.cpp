@@ -262,8 +262,25 @@ BacktestResult BacktestEngine::run(const std::string& start_date,
         }
 
         double cap_trimmed = 0.0;
-        int buys_before_cap = 0;
-        for (const auto& o : buys) if (o.quantity > 0) ++buys_before_cap;
+        /*
+         * KNOWN（口径不一致，本次未改，因为改了会动 cap_contention 的数字）：
+         *
+         * 这里原本有一个 `buys_before_cap` 计数——数当天有几个有效买单——但它算完
+         * 从来没被用过，所以被 -Wunused-but-set-variable 抓了出来。
+         *
+         * 它想做的事，看下面 (2c) 现金竞争那段就清楚了：那里有个
+         * `if (effective_buys >= 2)` 的门槛，理由写在原注释里——「只有真的有两个
+         * 以上买单在抢才算一次资金竞争」，否则单标的请求 100% 现金、手续费一顶就超，
+         * 也会被记成抢钱，「对任何满仓请求都报警等于没用」。
+         *
+         * 但 cap_contention_days 没有这道门槛。同一个道理在这里同样成立：
+         * 单个买单撞上总仓位上限被削，那是「撞了上限」，不是「多个标的在抢额度」。
+         * 所以 cap_contention_days 按作者自己定的标准是偏高的。
+         *
+         * 没在这次改，是因为它会改变 /api/backtest/run 返回的 cap_contention.days，
+         * 而本次改动的前提是「不动任何数字」。留待单独一个提交处理，届时要同步
+         * 更新 README 对该字段的说明。
+         */
         if (risk_mgr.has_total_cap()) {
             double want = 0.0;
             for (const auto& o : buys) {
@@ -383,7 +400,7 @@ BacktestResult BacktestEngine::run(const std::string& start_date,
             // (4a) 风控止损（用今日收盘价判定）→ 触发则挂到下一 bar 开盘成交
             auto risk_orders = risk_mgr.check_stop_loss(
                 sym, bar.close, ctx.position_quantity,
-                ctx.position_avg_price, ctx.total_value);
+                ctx.position_avg_price);
             if (!risk_orders.empty()) {
                 for (auto& order : risk_orders) {
                     order.symbol = sym;

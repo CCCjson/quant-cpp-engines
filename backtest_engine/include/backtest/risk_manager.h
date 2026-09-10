@@ -32,16 +32,19 @@ public:
      *   current_price   : bar close price
      *   position_qty    : current shares held
      *   avg_cost        : average entry cost
-     *   total_value     : portfolio total value
      *
      * Returns: a vector of forced-sell orders (may be empty).
+     *
+     * 注：这里原来还有一个 total_value 参数，文档写着「portfolio total value」，
+     * 但实现从未读过它——止损判定只依赖 current_price / avg_cost 和跟踪高点，
+     * 与组合总资产无关。留着它会让调用方以为总资产会影响止损决策，所以删掉。
+     * 若将来要做「按组合比例决定止损力度」，届时再作为新参数显式加回。
      */
     std::vector<Order> check_stop_loss(
         const std::string& symbol,
         double current_price,
         int position_qty,
-        double avg_cost,
-        double total_value);
+        double avg_cost);
 
     /*
      * filter_buy_quantity -- 买单成交前的仓位闸门，返回放行的数量（0 = 拒绝）。

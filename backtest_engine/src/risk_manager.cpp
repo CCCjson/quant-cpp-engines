@@ -17,8 +17,7 @@ std::vector<Order> RiskManager::check_stop_loss(
     const std::string& symbol,
     double current_price,
     int position_qty,
-    double avg_cost,
-    double total_value)
+    double avg_cost)
 {
     std::vector<Order> orders;
     if (!config_.enabled || position_qty <= 0 || avg_cost <= 0.0) {
