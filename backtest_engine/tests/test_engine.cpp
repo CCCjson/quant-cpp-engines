@@ -19,8 +19,8 @@ static std::vector<Bar> make_trend_data(int days, double start, double daily_cha
     double price = start;
     for (int i = 0; i < days; ++i) {
         Bar b;
-        char buf[16];
-        snprintf(buf, sizeof(buf), "2025-%02d-%02d", (i / 28) + 1, (i % 28) + 1);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "2025-%02d-%02d", 1 + (i / 28) % 12, 1 + (i % 28));
         b.date = buf;
         b.open = price;
         price += daily_change;
@@ -88,7 +88,7 @@ TEST(EngineTest, FillsAtNextBarOpenNotSameBarClose) {
     std::vector<Bar> bars;
     for (int i = 0; i < 3; ++i) {
         Bar b;
-        char buf[16];
+        char buf[32];
         snprintf(buf, sizeof(buf), "2025-01-%02d", i + 1);
         b.date = buf;
         b.open = 100.0 + i * 10.0;   // 100, 110, 120
@@ -139,8 +139,8 @@ TEST(EngineTest, MACrossProfitOnUptrend) {
     double price = 120.0;
     for (int i = 0; i < 100; ++i) {
         Bar b;
-        char buf[16];
-        snprintf(buf, sizeof(buf), "2025-%02d-%02d", (i / 28) + 1, (i % 28) + 1);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "2025-%02d-%02d", 1 + (i / 28) % 12, 1 + (i % 28));
         b.date = buf;
         b.open = price;
         if (i < 30) {

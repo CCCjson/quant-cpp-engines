@@ -44,7 +44,7 @@ Bar flat(const std::string& date, double px) {
 }
 
 std::string day(int i) {
-    char buf[16];
+    char buf[32];
     std::snprintf(buf, sizeof(buf), "2026-01-%02d", i);
     return std::string(buf);
 }

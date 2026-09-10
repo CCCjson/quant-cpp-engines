@@ -123,8 +123,8 @@ Bar mk(const std::string& date, double open, double high, double low, double clo
 }
 
 std::string day(int i) {
-    char buf[16];
-    std::snprintf(buf, sizeof buf, "2025-%02d-%02d", (i / 28) + 1, (i % 28) + 1);
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "2025-%02d-%02d", 1 + (i / 28) % 12, 1 + (i % 28));
     return buf;
 }
 

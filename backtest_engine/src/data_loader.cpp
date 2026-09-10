@@ -190,7 +190,11 @@ std::vector<Bar> DataLoader::generate_sample_data(int days,
          *
          * 改成真的日历推进：每月按实际天数走，闰年也算对。
          */
-        char date_buf[16];
+        // 取 36 而非刚好够用的 11：GCC 的 -Wformat-truncation 无法证明 year
+        // 不会超过 9999（理论上 %04d 可以吐出 "-2147483648" 共 11 字符），
+        // 按最坏情况 11 + 1 + 11 + 1 + 11 + NUL = 36。
+        // 给足是真正满足了这个警告，而不是用 pragma 把它压掉。
+        char date_buf[36];
         int year = 2025, month = 1, day = 1;
         {
             int remaining = i;

@@ -17,8 +17,8 @@ static std::vector<Bar> make_bars(int days, double start = 100.0, double step = 
     double price = start;
     for (int i = 0; i < days; ++i) {
         Bar b;
-        char buf[16];
-        snprintf(buf, sizeof(buf), "2025-%02d-%02d", (i / 28) + 1, (i % 28) + 1);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "2025-%02d-%02d", 1 + (i / 28) % 12, 1 + (i % 28));
         b.date = buf;
         b.open = price;
         price += step;

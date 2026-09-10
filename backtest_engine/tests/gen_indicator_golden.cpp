@@ -95,9 +95,9 @@ static Bar mk(const std::string& date, double open, double high, double low, dou
 }
 
 static std::string day(int i) {
-    char buf[16];
+    char buf[32];
     // 每月按 28 天算，保证日期严格递增且可比（引擎按字符串比日期）
-    std::snprintf(buf, sizeof buf, "2025-%02d-%02d", (i / 28) + 1, (i % 28) + 1);
+    std::snprintf(buf, sizeof buf, "2025-%02d-%02d", 1 + (i / 28) % 12, 1 + (i % 28));
     return buf;
 }
 
