@@ -26,10 +26,20 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)    # 必须支持 C++17，不降级
 
 # ── 编译选项 ──
-# -Wall  : 开启所有常见警告
-# -Wextra: 开启更多警告
-# -O2    : 优化级别 2（Release 模式下自动开启）
-add_compile_options(-Wall -Wextra)
+# 用 INTERFACE 库承载选项，再逐个 target 链接。
+#
+# 这里原来是目录级的 add_compile_options(-Wall -Wextra)，问题是它会波及下面
+# FetchContent 拉进来的 googletest / httplib / json——那是别人的代码，加上
+# -Werror 之后会直接炸掉构建。改成 target 级，选项只作用于本项目自己的代码。
+add_library(orderbook_flags INTERFACE)
+target_compile_options(orderbook_flags INTERFACE
+    -Wall -Wextra -Werror
+
+    # -ffp-contract=off：禁止把 a*b+c 收缩成一条 FMA 指令（少一次舍入，差 1 ULP）。
+    # 订单簿这边暂时没有递推式，但两个引擎保持同一套浮点约定，
+    # 以免以后把某段计算从一边搬到另一边时结果对不上。
+    -ffp-contract=off
+)
 
 # ============================================================
 # FetchContent — 自动下载第三方库
@@ -94,6 +104,7 @@ target_include_directories(orderbook_server PRIVATE
 
 # 链接第三方库
 target_link_libraries(orderbook_server PRIVATE
+    orderbook_flags
     nlohmann_json::nlohmann_json    # JSON 库
     httplib::httplib                 # HTTP 服务器库
 )
@@ -115,6 +126,7 @@ if(EXISTS ${BENCH_OB_SRC})
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     target_link_libraries(bench_orderbook PRIVATE
+        orderbook_flags
         nlohmann_json::nlohmann_json
         httplib::httplib
     )
@@ -142,6 +154,7 @@ target_include_directories(orderbook_tests PRIVATE
 )
 
 target_link_libraries(orderbook_tests PRIVATE
+    orderbook_flags
     nlohmann_json::nlohmann_json
     httplib::httplib
     GTest::gtest_main               # GoogleTest + 自带 main 函数

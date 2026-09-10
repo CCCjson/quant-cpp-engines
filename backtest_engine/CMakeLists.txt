@@ -19,6 +19,28 @@ project(backtest_cpp VERSION 1.0.0 LANGUAGES CXX)  # 项目名 + 版本 + 语言
 set(CMAKE_CXX_STANDARD 17)                # 使用 C++17 标准
 set(CMAKE_CXX_STANDARD_REQUIRED ON)       # 必须支持 C++17，否则报错
 
+# ── 编译选项 ──
+# 用 INTERFACE 库承载选项，再逐个 target 链接，而不是用目录级的
+# add_compile_options()。原因：下面 FetchContent 拉进来的 googletest /
+# httplib / json 是别人的代码，目录级选项会波及它们，-Werror 会在
+# 第三方代码上炸掉构建。
+add_library(backtest_flags INTERFACE)
+target_compile_options(backtest_flags INTERFACE
+    -Wall -Wextra -Werror
+
+    # -ffp-contract=off：禁止把 a*b+c 收缩成一条 FMA 指令。
+    #
+    # 这不是洁癖，是本项目的正确性前提。指标（macd/rsi/kdj）的递推式长这样：
+    #     alpha * close + (1.0 - alpha) * prev
+    # clang 默认 -ffp-contract=on，实测这一行会被合成一条 fmadd。FMA 只做
+    # 一次舍入，分开算做两次，结果差 1 ULP。
+    #
+    # 只要「朴素全量重算版」和「增量递推版」在不同的内联上下文里拿到了不同的
+    # 收缩决策，两者就不再逐位相同——而「逐位相同」正是 benchmarks/ 里那套
+    # 等价性论证赖以成立的东西。关掉收缩，让浮点运算序列由源码唯一确定。
+    -ffp-contract=off
+)
+
 # ── FetchContent：自动下载第三方库 ──
 # 好处：不需要手动安装依赖，cmake 会自动从 GitHub 下载
 include(FetchContent)
@@ -84,6 +106,7 @@ add_executable(backtest_server
 
 # 链接第三方库到主程序
 target_link_libraries(backtest_server PRIVATE
+    backtest_flags
     nlohmann_json::nlohmann_json    # JSON 库
     httplib::httplib                # HTTP 服务器库
 )
@@ -95,6 +118,7 @@ set(BENCH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../benchmarks/bench_backtest.cpp)
 if(EXISTS ${BENCH_SRC})
     add_executable(bench_backtest ${BENCH_SRC} ${LIB_SOURCES})
     target_link_libraries(bench_backtest PRIVATE
+        backtest_flags
         nlohmann_json::nlohmann_json
         httplib::httplib
     )
@@ -120,6 +144,7 @@ add_executable(backtest_tests
 )
 
 target_link_libraries(backtest_tests PRIVATE
+    backtest_flags
     nlohmann_json::nlohmann_json
     httplib::httplib
     GTest::gtest_main              # GoogleTest（自带 main 函数）
