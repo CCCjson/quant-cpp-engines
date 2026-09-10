@@ -41,6 +41,35 @@ target_compile_options(orderbook_flags INTERFACE
     -ffp-contract=off
 )
 
+# ── Sanitizer（可选）──
+# 用法：cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+# 或者直接 ./build.sh asan
+#
+# ASan 抓内存错误（越界、use-after-free、泄漏），UBSan 抓未定义行为
+# （有符号溢出、错误的 static_cast、空指针解引用等）。
+#
+# 这个项目里 UBSan 尤其有用：引擎里有几处 double → int 的转换，注释里
+# 记着「raw static_cast 一个 8e9 的 double 是 UB，会得到 INT_MIN」这类
+# 教训（见 risk_manager.cpp 的 _qty_from_headroom）。这类问题只有工具
+# 抓得住，靠读代码是漏的。
+#
+# -fno-sanitize-recover=all：出问题直接 abort，而不是打一行日志继续跑。
+# CI 里必须这样，否则 UBSan 的发现会被淹在输出里、退出码还是 0。
+option(ENABLE_SANITIZERS "开启 AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_SANITIZERS)
+    target_compile_options(orderbook_flags INTERFACE
+        -fsanitize=address,undefined
+        -fno-sanitize-recover=all
+        -fno-omit-frame-pointer   # 让 ASan 的栈回溯可读
+        -g
+    )
+    # sanitizer 必须同时作用于链接期，否则运行时库不会被链进来
+    target_link_options(orderbook_flags INTERFACE
+        -fsanitize=address,undefined
+    )
+    message(STATUS "Sanitizers: ON (ASan + UBSan, 不可恢复)")
+endif()
+
 # ============================================================
 # FetchContent — 自动下载第三方库
 # ============================================================
