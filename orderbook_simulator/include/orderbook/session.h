@@ -20,6 +20,8 @@
 
 #include <string>
 #include <vector>
+#include <optional>   // std::optional（本文件直接用到，不指望传递包含）
+#include <cstdint>    // std::uint32_t
 #include "orderbook/types.h"
 #include "orderbook/limit_order_book.h"
 #include "orderbook/matching_engine.h"
@@ -79,6 +81,15 @@ public:
     ///   min_qty    — 最小订单量
     ///   max_qty    — 最大订单量
     ///
+    ///   seed       — 随机数种子。给定则输出完全可复现；
+    ///                std::nullopt（默认）走 std::random_device，每次不同。
+    ///
+    /// ⚠️ 为什么需要可注入的种子：
+    /// 原来这里固定用 std::random_device 播种，于是播种结果不可复现。
+    /// 那意味着任何以播种盘口为前提的测试都是不可复现的——差分测试报出
+    /// 「第 137 步不一致」时无法重放，benchmark 也无法在同一副盘口上复测。
+    /// 「打印种子即可复现」是随机化测试的立身之本，所以种子必须能从外部指定。
+    ///
     /// 返回：实际生成了多少个订单
     int seed_orders(
         int count,
@@ -87,7 +98,8 @@ public:
         int spread_ticks = 2,
         int depth_ticks = 20,
         int min_qty = 100,
-        int max_qty = 1000
+        int max_qty = 1000,
+        std::optional<std::uint32_t> seed = std::nullopt
     );
 
 private:

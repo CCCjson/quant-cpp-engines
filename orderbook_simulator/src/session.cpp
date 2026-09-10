@@ -98,7 +98,8 @@ int Session::seed_orders(
     int spread_ticks,
     int depth_ticks,
     int min_qty,
-    int max_qty
+    int max_qty,
+    std::optional<std::uint32_t> seed
 ) {
     /*
      * 播种就是生成一堆随机的限价单，让订单簿看起来像真实的盘口。
@@ -111,11 +112,16 @@ int Session::seed_orders(
      */
 
     // ── C++ 随机数生成 ──
-    // C++ 的随机数比 rand() 更好用更公平
-    // std::mt19937 是梅森旋转算法，是目前最常用的随机数引擎
-    // std::random_device 用来获取一个真随机种子
-    std::random_device rd;        // 真随机数（用于播种，很慢）
-    std::mt19937 rng(rd());       // 伪随机数引擎（用真随机数播种，之后很快）
+    // std::mt19937 是梅森旋转算法，最常用的伪随机引擎。
+    //
+    // 种子来源二选一：
+    //   - 调用方给了 seed  → 用它，输出完全可复现（测试与 benchmark 走这条）
+    //   - 没给（默认）      → std::random_device，每次盘口都不一样（演示走这条）
+    //
+    // 默认行为与改动前一致，所以现有调用方不受影响；但现在「可复现」成了
+    // 一个可以选的选项，而不是做不到的事。
+    std::mt19937 rng = seed ? std::mt19937(*seed)
+                            : std::mt19937(std::random_device{}());
 
     // 均匀分布：在 [a, b] 范围内等概率取值
     std::uniform_int_distribution<int> qty_dist(min_qty, max_qty);
