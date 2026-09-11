@@ -1,4 +1,34 @@
-# What actually decides fast and slow — an investigation that falsified its own premise
+#!/usr/bin/env python3
+"""
+report_en.py — the English template for benchmarks/README.md
+
+⚠️ Every number in the generated document is interpolated from results/*.json.
+   Nothing is typed by hand. That property is the reason this report is worth
+   reading at all, so the English version is generated too rather than
+   translated once and left to rot.
+
+   Do not edit benchmarks/README.md directly — edit this template and re-run
+   make_report.py.
+
+build_en() receives make_report.py's globals() and injects them into this
+module's globals so the f-string below can reference them by plain name.
+Slightly unusual, but it keeps a single source of truth for the computed
+values: both language versions interpolate the *same* variables from the
+*same* run.
+"""
+
+from __future__ import annotations
+
+
+def build_en(g: dict) -> str:
+    globals().update(g)
+
+    # 表头要在 f-string 之外算好。
+    # 写成 f"{{n:,}} bars" 放在外层 f-string 里是不行的 ——
+    # 双花括号是转义，结果会原样输出 "{n:,} bars"（踩过）。
+    size_hdr = " | ".join(f"{n:,} bars" for n in g["SIZES"])
+
+    return f"""# What actually decides fast and slow — an investigation that falsified its own premise
 
 This is not a "C++ vs Python" scoreboard.
 
@@ -58,13 +88,7 @@ computing the same thing, and timing them against each other is meaningless.
 
 | Metric | Python | C++ | Diff |
 |---|---|---|---|
-| 最终资产 | 1,448,492.33183950 | 1,448,492.33183950 | 0.00e+00 |
-| 总收益率 | 0.44849233 | 0.44849233 | 0.00e+00 |
-| 年化收益率 | 0.67989710 | 0.67989710 | 0.00e+00 |
-| 最大回撤 | 0.09834732 | 0.09834732 | 0.00e+00 |
-| 回撤金额 | 119,475.72569250 | 119,475.72569250 | 0.00e+00 |
-| 总手续费 | 3,612.75016050 | 3,612.75016050 | 0.00e+00 |
-| 胜率 | 1.00000000 | 1.00000000 | 0.00e+00 |
+{NL.join(parity_rows)}
 
 **All seven at `0.00e+00`** — not "within tolerance," bit-identical.
 Gate script: [`parity_gate.py`](parity_gate.py), output:
@@ -74,15 +98,15 @@ macOS/clang and Linux/gcc.
 <details>
 <summary>Two known convention differences (on the record, not swept under the rug)</summary>
 
-- **Annualized volatility** differs by `3.32e-04`:
+- **Annualized volatility** differs by `{parity['known_differences']['volatility']['diff']:.2e}`:
   pandas' `.std()` defaults to `ddof=1` (sample), the C++ side uses `ddof=0` (population).
   The ratio is exactly `sqrt(n/(n-1))`.
-- **Sharpe ratio** differs by `1.2594`: both are
+- **Sharpe ratio** differs by `{parity['known_differences']['sharpe_ratio']['diff']:.4f}`: both are
   standard algorithms taking different annualization paths —
   C++ uses "mean daily excess return × √252", Python uses
   "(geometric annualized return − rf) / annualized volatility".
   The parent project's 2026-07-15 retirement note recorded "Sharpe differs by 0.018"; on this
-  fixture the measured difference is `1.2594`.
+  fixture the measured difference is `{parity['known_differences']['sharpe_ratio']['diff']:.4f}`.
   The two annualization paths diverge more as return skew grows, so that note was presumably
   taken on a different dataset — **the old record was not taken on faith; the measurement wins.**
 - **Trade count**: Python counts fills, C++ counts round-trips, roughly 2:1 on the same set of
@@ -101,12 +125,9 @@ Four strategies present on both sides × five data sizes, fed **byte-identical**
 market data. The table below is C++ in-process vs the pure Python engine (timings use `min`,
 reasoning in [methodology](#what-was-done-to-make-these-numbers-trustworthy)):
 
-| Strategy | 250 bars | 1,000 bars | 2,500 bars | 10,000 bars | 25,000 bars |
-|---|---|---|---|---|---|
-| `MA_CROSS` | 318.3× | 293.1× | 267.5× | 256.1× | 241.6× |
-| `MACD` | 72.0× | 21.7× ⚠ | 8.7× | 2.0× | 0.9× ⚠ |
-| `RSI` | 88.2× | 28.4× | 11.4× | 2.6× | 1.1× |
-| `KDJ` | 97.2× | 32.8× | 13.6× | 3.4× | 1.4× |
+| Strategy | {size_hdr} |
+|---|{"---|" * len(SIZES)}
+{NL.join(main_rows)}
 
 If H1 held, every row would be a roughly horizontal line.
 
@@ -114,7 +135,7 @@ If H1 held, every row would be a roughly horizontal line.
 
 `MA_CROSS` does hold steady at 242–318× — consistent with the hypothesis. But the other three
 **collapse sharply with scale**: at 25,000 bars `MACD` is only
-**0.9×** — meaning **C++ lost to Python**.
+**{macd_last['speedup_vs_py_pure']:.1f}×** — meaning **C++ lost to Python**.
 
 Same language, same engine, same data. Change nothing but the strategy and the conclusion
 reverses. **H1 cannot explain that. Falsified.**
@@ -130,15 +151,7 @@ gives the order directly: `t ∝ N^k` → `log t = k·log N + c`.
 
 | Engine | Strategy | Fitted slope k | Verdict |
 |---|---|---|---|
-| C++ | `KDJ` | **1.934** | **O(N²)** 二次 |
-| C++ | `MACD` | **1.982** | **O(N²)** 二次 |
-| C++ | `MACD_INCREMENTAL` | **1.048** | **O(N)** 线性 |
-| C++ | `MA_CROSS` | **1.060** | **O(N)** 线性 |
-| C++ | `RSI` | **1.968** | **O(N²)** 二次 |
-| Python | `KDJ` | **0.999** | **O(N)** 线性 |
-| Python | `MACD` | **1.007** | **O(N)** 线性 |
-| Python | `MA_CROSS` | **1.001** | **O(N)** 线性 |
-| Python | `RSI` | **0.995** | **O(N)** 线性 |
+{NL.join(fit_rows)}
 
 **Python is k ≈ 1.00 across the board; three C++ strategies are k ≈ 1.95.**
 
@@ -163,20 +176,16 @@ is that the EMA state is carried forward, making each bar O(1) with zero heap al
 
 | Bars | Original O(N²) | Incremental O(N) | Speedup | Result check |
 |---|---|---|---|---|
-| 250 | 0.407 | 0.047 | **8.6×** | ✅ 逐位相同 |
-| 1,000 | 2.617 | 0.201 | **13.0×** | ✅ 逐位相同 |
-| 2,500 | 16.786 | 0.510 | **32.9×** | ✅ 逐位相同 |
-| 10,000 | 279.823 | 2.329 | **120.1×** | ✅ 逐位相同 |
-| 25,000 | 1,604.383 | 5.782 | **277.5×** | ✅ 逐位相同 |
+{NL.join(incr_rows)}
 
 The speedup grows **monotonically** with size — that is the fingerprint of O(N²)→O(N).
 
 And the most important line is hidden inside the numbers: at 25,000 bars the incremental MACD
-takes 5.782 ms while `MA_CROSS` takes 5.899 ms —
+takes {ms(incr_last['macd_incr_min'])} ms while `MA_CROSS` takes {ms(cpp_ma_last)} ms —
 **essentially the same**. Fix the algorithm and MACD immediately returns to `MA_CROSS`'s
-magnitude; its ratio against Python goes from **0.9× (losing)
-to 248× (winning)**, in line with `MA_CROSS`'s
-242×.
+magnitude; its ratio against Python goes from **{macd_last['speedup_vs_py_pure']:.1f}× (losing)
+to {incr_vs_py:.0f}× (winning)**, in line with `MA_CROSS`'s
+{ma_last['speedup_vs_py_pure']:.0f}×.
 
 > **Conclusion**: "the C++ MACD backtest loses to Python" has nothing to do with the language.
 > It was a piece of C++ written as O(N²) losing to a piece of Python written as O(N).
@@ -192,32 +201,32 @@ Computing the same MACD over 25,000 bars:
 
 | Approach | Time |
 |---|---|
-| Python + numpy, whole column at once | **0.560 ms** |
-| C++ hand-written scalar loop, recomputed per bar | **≈ 1,657.756 ms** |
+| Python + numpy, whole column at once | **{ms(py_prep_last)} ms** |
+| C++ hand-written scalar loop, recomputed per bar | **≈ {ms(cpp_indicator_cost)} ms** |
 
-(The C++ figure is "full MACD run 1,663.655 ms − the near-indicator-free MA_CROSS run
-5.899 ms", an approximation of the indicator portion.)
+(The C++ figure is "full MACD run {ms(cpp_macd_last)} ms − the near-indicator-free MA_CROSS run
+{ms(cpp_ma_last)} ms", an approximation of the indicator portion.)
 
-A ratio of about **2,963×**.
+A ratio of about **{vectorize_ratio:,.0f}×**.
 
 **But read that number carefully — it is not "numpy beats C++."** numpy *is* C underneath.
 What is being compared above is "O(N) computed once" against "O(N²) recomputed per bar," and
-the overwhelming majority of that 2,963× is complexity order, not
+the overwhelming majority of that {vectorize_ratio:,.0f}× is complexity order, not
 vectorization.
 
 Swap in **well-written C++** and the conclusion changes immediately: the incremental version
-from H2 runs the entire backtest in 5.782 ms, and within it the
+from H2 runs the entire backtest in {ms(incr_last['macd_incr_min'])} ms, and within it the
 indicator work (four floating-point operations per bar) is essentially free — that is,
 **correctly implemented C++ does not lose to numpy on indicator computation, and is faster.**
 
 So the part of H3 that holds is this, and it is valuable enough:
 
 > Vectorization brings Python **to within the same order of magnitude as C** for bulk numeric
-> work — a full MACD over 25,000 bars in 0.560 ms. It will not beat well-written
+> work — a full MACD over 25,000 bars in {ms(py_prep_last)} ms. It will not beat well-written
 > C++, but it demolishes the premise that "using Python necessarily means being slow."
 
 For a sense of scale: Python's indicator preparation is only
-**0.04%** of its end-to-end time — almost
+**{row(SIZES[-1], 'MACD')['py_indicator_prep_share']:.2%}** of its end-to-end time — almost
 free. **Nearly all of Python's time goes into the per-bar loop**, which is its real weakness,
 and exactly what H5 examines.
 
@@ -231,19 +240,15 @@ O(N²)), but reuses one block of memory for its four buffers, allocating nothing
 
 | Bars | Original<br>O(N²)+alloc | No-alloc<br>O(N²) | Incremental<br>O(N) | Alloc<br>share | Algorithm<br>share |
 |---|---|---|---|---|---|
-| 250 | 0.464 | 0.127 | 0.045 | 80% | 20% |
-| 1,000 | 2.618 | 1.653 | 0.192 | 40% | 60% |
-| 2,500 | 16.645 | 9.597 | 0.489 | 44% | 56% |
-| 10,000 | 275.277 | 154.403 | 2.259 | 44% | 56% |
-| 25,000 | 1,692.332 | 983.385 | 5.880 | 42% | 58% |
+{NL.join(alloc_rows)}
 
 All three versions produce **identical results**. Allocation accounts for roughly
-**42%** of the available headroom, the algorithm for
-**58%**.
+**{alloc_last['alloc_share_of_gain']:.0%}** of the available headroom, the algorithm for
+**{alloc_last['algo_share_of_gain']:.0%}**.
 
 But there is a more important observation: eliminating allocation buys only
-**1.7×**, and the no-alloc version **is still quadratic** (slope k ≈
-2.02 over the last two sizes).
+**{alloc_only_gain:.1f}×**, and the no-alloc version **is still quadratic** (slope k ≈
+{noalloc_k:.2f} over the last two sizes).
 
 > **Allocation optimization buys a constant factor; algorithmic optimization buys an order.**
 > At scale, constant factors stop being worth much.
@@ -258,24 +263,22 @@ Measuring the specific operations inside each bar, against the same operations o
 
 | Operation | pandas DataFrame | numpy array | Ratio |
 |---|---|---|---|
-| `df.iloc[i]['close']` 取单值 | 10.370 µs | 0.028 µs | **376×** |
-| `df.iloc[:i+1]` 切历史窗口 | 7.631 µs | 0.052 µs | **147×** |
-| `df['ma5'].iloc[-1]` 读指标 | 2.077 µs | 0.028 µs | **74×** |
+{NL.join(pd_table)}
 
-The Python engine measures **57.0 µs per bar**, of which
-**36.6 µs (64%)** goes purely into
+The Python engine measures **{pdo['engine_total_per_bar_us']:.1f} µs per bar**, of which
+**{pdo['pandas_ops_per_bar_us']:.1f} µs ({pdo['pandas_share']:.0%})** goes purely into
 DataFrame scalar lookups and slicing.
 
 A DataFrame is designed for **whole-column batch operations**: every `df.iloc[i]['close']`
 goes through index resolution, type dispatch and return-object construction. Element-wise
 scalar access is its worst possible use.
 
-> **Of the claim "Python is slow," 64% is not a Python problem at all —
+> **Of the claim "Python is slow," {pdo['pandas_share']:.0%} is not a Python problem at all —
 > it is the wrong data structure.** Replacing the DataFrame with numpy arrays (without changing
 > the semantics of a single line of Python) should bring per-bar cost from
-> 57.0 µs down to about
-> 20.4 µs — roughly
-> 2.8× faster.
+> {pdo['engine_total_per_bar_us']:.1f} µs down to about
+> {pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']:.1f} µs — roughly
+> {pdo['engine_total_per_bar_us'] / (pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']):.1f}× faster.
 
 What remains after that is genuine interpreter overhead — and that part can only be addressed
 by changing language.
@@ -288,13 +291,10 @@ The C++ engine is exposed as an HTTP service. How much does transport eat (25,00
 
 | Strategy | Full HTTP | In-process | Transport share |
 |---|---|---|---|
-| `MA_CROSS` | 63.921 | 5.899 | 90.8% |
-| `MACD` | 1,714.445 | 1,663.655 | 3.0% |
-| `RSI` | 1,153.329 | 1,085.608 | 5.9% |
-| `KDJ` | 1,065.574 | 999.958 | 6.2% |
+{NL.join(http_rows)}
 
-For a job like `MA_CROSS` where the engine itself needs only 5.899 ms,
-**91% of the time goes into JSON serialization and the HTTP
+For a job like `MA_CROSS` where the engine itself needs only {ms(cpp_ma_last)} ms,
+**{http_small['transport_share']:.0%} of the time goes into JSON serialization and the HTTP
 round trip** — make the engine ten times faster and the user will not notice. For jobs where
 the engine itself takes one or two seconds, transport falls to 3–6%.
 
@@ -310,8 +310,8 @@ slows it down.
 `engine.py:113` sits inside `for order in pending:`, so it fires **per fill**, not per bar.
 Over 25,000 bars there are only about a thousand fills.
 
-Measurement agreed: logging on 1470.6 ms vs logging off
-1510.3 ms — a ratio of 0.97×, i.e. logging
+Measurement agreed: logging on {lc['logging_on_median_s'] * 1000:.1f} ms vs logging off
+{lc['logging_off_median_s'] * 1000:.1f} ms — a ratio of {lc['slowdown_x']:.2f}×, i.e. logging
 "made it faster." That is obviously noise; the real difference is **below measurement
 resolution**.
 
@@ -322,7 +322,7 @@ to tell whether you cherry-picked.
 
 ### H8 · Cold start ⚠️ doesn't affect the engine, but does affect perceived speed
 
-`import pandas` takes **386 ms**.
+`import pandas` takes **{bt['cold_start']['import_pandas_seconds'] * 1000:.0f} ms**.
 
 This is excluded from the engine timings (it is not the engine's cost), but for a usage pattern
 like "run one small backtest," it costs more than the backtest itself. In a long-lived process
@@ -332,37 +332,34 @@ it is a one-time cost; in a command-line tool you pay it every time.
 
 ## Supplement: does changing Python version change the conclusion?
 
-All the Python numbers above ran on **3.10.19** (the parent project's conda
+All the Python numbers above ran on **{env['python']}** (the parent project's conda
 environment). But CPython had a significant optimization pass starting in 3.11, and reporting
 only one version is unfair to Python. So the entire Python side was rerun on this machine's
-**3.13.11** (pandas 2.3.3 / numpy 2.3.5) — the C++ side
+**{py313['python']}** (pandas {py313['pandas']} / numpy {py313['numpy']}) — the C++ side
 unchanged, same data, same strategies, same sampling.
 
 At 25,000 bars:
 
-| Strategy | Python 3.10.19 | Python 3.13.11 | Newer is faster by | C++ lead changes |
+| Strategy | Python {env['python']} | Python {py313['python']} | Newer is faster by | C++ lead changes |
 |---|---|---|---|---|
-| `MA_CROSS` | 1,425.039 | 1,048.879 | **1.36×** | 241.6× → **177.8×** |
-| `MACD` | 1,434.647 | 1,034.421 | **1.39×** | 0.9× → **0.6×** |
-| `RSI` | 1,151.085 | 841.533 | **1.37×** | 1.1× → **0.8×** |
-| `KDJ` | 1,378.555 | 1,007.678 | **1.37×** | 1.4× → **1.0×** |
+{NL.join(v_rows)}
 
-**Python 3.13.11 is about 1.36× faster**, and that speedup cuts two ways:
+**Python {py313['python']} is about {v_ma:.2f}× faster**, and that speedup cuts two ways:
 
 - it **weakens** the "language" factor: on `MA_CROSS`, C++'s lead drops from
-  242× to **178×**
+  {ma_last['speedup_vs_py_pure']:.0f}× to **{v_ma_ratio_new:.0f}×**
 - it **strengthens** the core conclusion: on `MACD`, C++ goes from
-  0.9× to **0.62×** — **losing by more**
+  {macd_last['speedup_vs_py_pure']:.1f}× to **{v_macd_ratio_new:.2f}×** — **losing by more**
 
-On 3.13.11, C++ **loses or ties on three of the four strategies** — `MACD`
-0.62×, `RSI`
-0.78×,
+On {py313['python']}, C++ **loses or ties on three of the four strategies** — `MACD`
+{v_macd_ratio_new:.2f}×, `RSI`
+{r313(SIZES[-1], 'RSI')['py_pure_engine']['min'] / row(SIZES[-1], 'RSI')['cpp_inproc']['min']:.2f}×,
 `KDJ`
-1.01× —
+{r313(SIZES[-1], 'KDJ')['py_pure_engine']['min'] / row(SIZES[-1], 'KDJ')['cpp_inproc']['min']:.2f}× —
 holding its lead only on `MA_CROSS`.
 
-> Worth noting: the "language/runtime" factor itself moves by **36%** just
-> from a Python point release. The 277× from O(N²)→O(N) is structural
+> Worth noting: the "language/runtime" factor itself moves by **{(v_ma - 1) * 100:.0f}%** just
+> from a Python point release. The {incr_last['speedup']:.0f}× from O(N²)→O(N) is structural
 > and does not drift with the environment.
 > **That is itself further evidence for "don't treat language as the primary variable."**
 
@@ -376,20 +373,20 @@ Ordered by impact on final runtime:
 
 | # | Factor | Magnitude | Nature | Fixable |
 |---|---|---|---|---|
-| 1 | **Algorithmic order** O(N²)→O(N) | up to **277×**, grows with N | complexity order | ✅ yes, biggest win |
-| 2 | **Language / runtime** | **178–242×** (range from Python version) | constant factor | ⚠️ requires changing language |
-| 3 | **Data structure** (pandas scalar indexing) | about **2.8×** | constant factor | ✅ switch to numpy arrays |
-| 4 | **Heap allocation** | **1.7×** | constant factor | ✅ buffer reuse |
-| 5 | **Transport layer** | **91%** of small jobs | fixed overhead | ✅ batch / in-process calls |
-| 6 | **Cold start** | **386 ms** once | fixed overhead | ⚠️ amortized by a long-lived process |
+| 1 | **Algorithmic order** O(N²)→O(N) | up to **{incr_last['speedup']:.0f}×**, grows with N | complexity order | ✅ yes, biggest win |
+| 2 | **Language / runtime** | **{v_ma_ratio_new:.0f}–{ma_last['speedup_vs_py_pure']:.0f}×** (range from Python version) | constant factor | ⚠️ requires changing language |
+| 3 | **Data structure** (pandas scalar indexing) | about **{pdo['engine_total_per_bar_us'] / (pdo['engine_total_per_bar_us'] - pdo['pandas_ops_per_bar_us']):.1f}×** | constant factor | ✅ switch to numpy arrays |
+| 4 | **Heap allocation** | **{alloc_only_gain:.1f}×** | constant factor | ✅ buffer reuse |
+| 5 | **Transport layer** | **{http_small['transport_share']:.0%}** of small jobs | fixed overhead | ✅ batch / in-process calls |
+| 6 | **Cold start** | **{bt['cold_start']['import_pandas_seconds'] * 1000:.0f} ms** once | fixed overhead | ⚠️ amortized by a long-lived process |
 | 7 | **Logging I/O** | below measurement resolution | — | nothing to fix |
 
 **The most important line is the comparison between rows 1 and 2:**
 
-In this dataset, **the gap from algorithmic order (up to 277×) is larger
-than the gap from language choice (178–242×)**,
+In this dataset, **the gap from algorithmic order (up to {incr_last['speedup']:.0f}×) is larger
+than the gap from language choice ({v_ma_ratio_new:.0f}–{ma_last['speedup_vs_py_pure']:.0f}×)**,
 and the former grows without bound in N and does not drift with the environment, while the
-latter is a bounded constant that moves 36% on a Python point release.
+latter is a bounded constant that moves {(v_ma - 1) * 100:.0f}% on a Python point release.
 
 So "should this be C++ or Python" is mostly the wrong question. The question to ask is:
 **can this computation be done once instead of recomputed at every step.**
@@ -409,35 +406,35 @@ help. Python has to walk bar by bar, paying interpreter and object overhead each
 C++'s home ground.
 
 **2. Single operations near the language's overhead floor** — order book matching at
-626 ns/order
+{sub['latency']['p50_ns']:,.0f} ns/order
 
 In Python, one function call plus a few object constructions already costs hundreds of
 nanoseconds. When an operation is tiny and performed enormously often, language overhead
 dominates.
 
 **3. When predictable tail latency is required** — order book p99.9 =
-2,000 ns
+{sub['latency']['p999_ns']:,.0f} ns
 
 No GC pauses. Python's garbage collector intervenes at unpredictable moments, which is fatal
 for a matching engine.
 
 **4. Small jobs invoked at high frequency** — parameter grid search
 
-A 250-bar backtest: C++ 0.04 ms
-vs Python 14 ms. Over a thousand
+A {SIZES[0]}-bar backtest: C++ {row(SIZES[0], 'MA_CROSS')['cpp_inproc']['min'] * 1000:.2f} ms
+vs Python {row(SIZES[0], 'MA_CROSS')['py_pure_engine']['min'] * 1000:.0f} ms. Over a thousand
 parameter sets that is the difference between interactive tuning and going to make coffee.
 
 ### Where Python clearly wins
 
 **1. Bulk computation that a vectorized library can take** — the cost of using Python ≈ 0
 
-A full MACD over 25,000 bars takes numpy only **0.560 ms**, which is
-0.04% of the whole backtest.
+A full MACD over 25,000 bars takes numpy only **{ms(py_prep_last)} ms**, which is
+{row(SIZES[-1], 'MACD')['py_indicator_prep_share']:.2%} of the whole backtest.
 
 ⚠️ Note the wording: "cost ≈ 0," not "faster." Per H3's conclusion, **vectorization does not
 beat well-written C++** — the incremental C++ version's indicator work is faster still. What it
 beats is **badly written C++** — the O(N²) version measured here, by about
-2,963×.
+{vectorize_ratio:,.0f}×.
 
 The real value is this: for this class of computation, choosing Python costs **almost nothing
 in performance**, so the budget can go to development speed and readability instead. That is a
@@ -446,14 +443,14 @@ different claim from "Python is faster."
 **2. Someone in the ecosystem already wrote the hard part in C**
 
 Using Python does not mean running at Python speed. What matters is whether the hot path lands
-in the interpreter or in a library. 64% of this Python engine's time went
+in the interpreter or in a library. {pdo['pandas_share']:.0%} of this Python engine's time went
 into pandas scalar indexing (H5) — the classic symptom of a hot path falling back into the
 interpreter and object layer. Same library, and using it right versus wrong differs by
-376×.
+{pd_rows[0][1] / pd_rows[0][2]:.0f}×.
 
-**3. Cost to write and change** — 1,431 lines vs 7,875 lines
+**3. Cost to write and change** — {py_loc:,} lines vs {cpp_loc:,} lines
 
-What the Python reference engine does in 1,431 lines, the C++ engine takes 7,875
+What the Python reference engine does in {py_loc:,} lines, the C++ engine takes {cpp_loc:,}
 lines to do (the latter does more — risk management, market rules, portfolio backtesting and
 six additional strategies — so this comparison is a rough order-of-magnitude reference, not a
 like-for-like line count).
@@ -480,11 +477,7 @@ pre-computed indicator columns), and exactly the direction the current C++ engin
 
 | Bars | C++ fills | Python fills |
 |---|---|---|
-| 250 | 41 | 0 |
-| 1,000 | 160 | 3 |
-| 2,500 | 392 | 3 |
-| 10,000 | 1,674 | 13 |
-| 25,000 | 4,149 | 21 |
+{NL.join(kdj_rows)}
 
 Up to **two orders of magnitude** apart. The cause is in the strategy logic itself:
 
@@ -513,24 +506,22 @@ magnitude.
 
 The order book simulator has no Python counterpart, so these are absolute numbers.
 
-**Matching throughput and submit latency** (200,000 mixed orders: 70% passive limit /
+**Matching throughput and submit latency** ({sub['orders']:,} mixed orders: 70% passive limit /
 20% aggressive crossing / 10% market)
 
 | Metric | Value |
 |---|---|
-| Throughput | **1,297,401 orders/sec** |
-| p50 | 626 ns |
-| p90 | 834 ns |
-| p99 | 1,251 ns |
-| p99.9 | 2,000 ns |
+| Throughput | **{sub['orders_per_sec']:,.0f} orders/sec** |
+| p50 | {sub['latency']['p50_ns']:,.0f} ns |
+| p90 | {sub['latency']['p90_ns']:,.0f} ns |
+| p99 | {sub['latency']['p99_ns']:,.0f} ns |
+| p99.9 | {sub['latency']['p999_ns']:,.0f} ns |
 
 **Book depth queries** — `get_depth(10)` as book depth grows
 
 | Orders in book | p50 (ns) | p99 (ns) | Amortized (ns) |
 |---|---|---|---|
-| 16,009 | 126 | 168 | 149 |
-| 23,502 | 84 | 126 | 147 |
-| 279,259 | 125 | 126 | 151 |
+{NL.join(depth_rows)}
 
 **Cancel** — a problem found, then fixed
 
@@ -541,23 +532,23 @@ Cancelling a non-existent id was always the worst case — both sides scanned in
 
 | Metric | Before index | After index | Change |
 |---|---|---|---|
-| **Amortized** | 44,389 ns | **142 ns** | **312×** |
-| p50 | 42,208 ns | 84 ns ⚠️ | 502× |
-| p99 | 97,958 ns | 334 ns ⚠️ | —— |
-| p99.9 | 126,333 ns | 792 ns ⚠️ | —— |
-| Cancel/submit p50 | 48.2× | 0.13× | —— |
+| **Amortized** | {cancel_before['amortized_ns']:,.0f} ns | **{cancel['amortized_ns']:,.0f} ns** | **{cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×** |
+| p50 | {cancel_before['latency']['p50_ns']:,.0f} ns | {cancel['latency']['p50_ns']:,.0f} ns ⚠️ | {cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}× |
+| p99 | {cancel_before['latency']['p99_ns']:,.0f} ns | {cancel['latency']['p99_ns']:,.0f} ns ⚠️ | —— |
+| p99.9 | {cancel_before['latency']['p999_ns']:,.0f} ns | {cancel['latency']['p999_ns']:,.0f} ns ⚠️ | —— |
+| Cancel/submit p50 | {cancel_before['latency']['p50_ns'] / sub_before['latency']['p50_ns']:.1f}× | {cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.2f}× | —— |
 
 **Why the headline uses the amortized value and not p50.** After the fix, a cancel is down to
-2.0 clock ticks (measured `steady_clock` granularity on
-this machine: 41 ns), so a single measurement carries roughly
-±24% quantization error — the trailing
+{cancel['latency']['p50_clock_ticks']:.1f} clock ticks (measured `steady_clock` granularity on
+this machine: {ob['clock_granularity_ns']:.0f} ns), so a single measurement carries roughly
+±{cancel['latency']['p50_quantization_rel_err'] * 100:.0f}% quantization error — the trailing
 digits on the ⚠️ rows are artifacts, not signal. Before the fix, p50 had
-1,029 ticks and was entirely trustworthy; after, it
+{cancel_before['latency']['p50_clock_ticks']:,.0f} ticks and was entirely trustworthy; after, it
 is not.
 
 So the defensible multiple is the amortized
-**312×**, not the
-502× that p50 implies. The
+**{cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×**, not the
+{cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}× that p50 implies. The
 latter looks better, but part of it comes from *the thing under test becoming too fast to
 measure*, and treating that as a result would be self-deception.
 
@@ -573,13 +564,13 @@ After switching to two incrementally maintained counters:
 
 | Metric | Before index | After index |
 |---|---|---|
-| `get_depth(10)` p50 @ 1,000 orders | 250 ns | 126 ns |
-| `get_depth(10)` p50 @ 10,000 orders | 250 ns | 84 ns |
-| `get_depth(10)` p50 @ 100,000 orders | 583 ns | 125 ns |
-| Submit p50 | 875 ns | 626 ns |
+| `get_depth(10)` p50 @ 1,000 orders | {depth_before[0]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][0]['latency']['p50_ns']:,.0f} ns |
+| `get_depth(10)` p50 @ 10,000 orders | {depth_before[1]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][1]['latency']['p50_ns']:,.0f} ns |
+| `get_depth(10)` p50 @ 100,000 orders | {depth_before[2]['latency']['p50_ns']:,.0f} ns | {ob['depth_query'][2]['latency']['p50_ns']:,.0f} ns |
+| Submit p50 | {sub_before['latency']['p50_ns']:,.0f} ns | {sub['latency']['p50_ns']:,.0f} ns |
 
 Note those three `get_depth` rows: before the change it grew with book depth from
-250 to 583 ns;
+{depth_before[0]['latency']['p50_ns']:,.0f} to {depth_before[2]['latency']['p50_ns']:,.0f} ns;
 after, it is **essentially flat**. That is the substance of this change — not a smaller
 constant, a changed order.
 
@@ -603,13 +594,13 @@ Raw data: [`results/orderbook.json`](results/orderbook.json) (after) ·
 
 | Item | Value |
 |---|---|
-| CPU | Apple M5 (10 cores) |
-| OS | Darwin 25.2.0 |
-| Compiler | Apple clang version 17.0.0 (clang-1700.6.3.2) |
-| C++ build | Release (-O3 -DNDEBUG) |
-| Python | 3.10.19 (CPython) |
-| pandas / numpy | 2.1.4 / 1.26.3 |
-| Sampling | 3 warmup rounds + 10 measured rounds |
+| CPU | {env['cpu']} ({env['cores']} cores) |
+| OS | {env['os']} |
+| Compiler | {env['compiler']} |
+| C++ build | {env['cpp_build_type']} |
+| Python | {env['python']} ({env['python_impl']}) |
+| pandas / numpy | {env['pandas']} / {env['numpy']} |
+| Sampling | {bt['config']['warmup']} warmup rounds + {bt['config']['runs']} measured rounds |
 
 ### Timings use `min`, not the median
 
@@ -642,7 +633,7 @@ actually determines how much work the engine did.
 ### Clock resolution
 
 `steady_clock` on this machine has a measured minimum non-zero interval of
-**41 ns**. Some order book operations are now only 2–3 ticks, so
+**{ob['clock_granularity_ns']:.0f} ns**. Some order book operations are now only 2–3 ticks, so
 the benchmark measures the granularity at runtime (it is not hardcoded — CI runs on both macOS
 and Linux, where it differs by orders of magnitude) and marks which of its own percentiles are
 quantization-limited, recording the relative error alongside.
@@ -698,15 +689,15 @@ capital at any size. The reasoning is recorded in [`benchlib.py`](benchlib.py)'s
 Ordered by value, all actionable:
 
 1. **Make `macd()` / `rsi()` / `kdj()` in `strategy_context.h` incremental.**
-   Measured at 277× on 25,000 bars, and takes complexity from O(N²) to
+   Measured at {incr_last['speedup']:.0f}× on 25,000 bars, and takes complexity from O(N²) to
    O(N). A reference implementation for MACD is in
    [`bench_backtest.cpp`](bench_backtest.cpp), verified bit-identical. RSI and KDJ have no
    prototype yet and would be written from scratch.
 
 2. ~~**Add an `order_id` index to `cancel_order` in `limit_order_book.cpp`.**~~
-   ✅ **Done.** Amortized cancel went from 44,389 ns to
-   142 ns
-   (**312×** — the amortized framing is
+   ✅ **Done.** Amortized cancel went from {cancel_before['amortized_ns']:,.0f} ns to
+   {cancel['amortized_ns']:,.0f} ns
+   (**{cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×** — the amortized framing is
    used because p50 is now below clock resolution), and `PriceLevel`'s aggregates were moved to
    incremental maintenance so `get_depth` no longer grows with book depth. See the order book
    section above.
@@ -756,4 +747,5 @@ The Python side needs `pandas` / `numpy` / `loguru` — pinned in
 ---
 
 *This document is generated by [`make_report.py`](make_report.py) from [`results/`](results/),
-at 2026-08-24 13:43:52. Every number can be traced to a results file.*
+at {env['timestamp']}. Every number can be traced to a results file.*
+"""

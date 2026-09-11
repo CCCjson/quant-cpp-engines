@@ -1,23 +1,26 @@
 # backtest_engine
 
-事件驱动的股票/加密货币回测引擎，C++17 编写，自带 REST API 服务器（默认 `:8002`）。
+An event-driven backtest engine for equities and crypto, in C++17, with a built-in REST API
+server (default `:8002`).
 
-**约 7.4k 行 C++ · 10 个内置策略 · 82 个 GoogleTest 用例全绿 · `-Wall -Wextra -Werror` 零警告**
+*[中文版 / Chinese version](README.zh-CN.md)*
+
+**~7.4k lines of C++ · 10 built-in strategies · 87 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
 
 ---
 
-## 构建与运行
+## Build and run
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 
-./build/backtest_tests          # 跑单元测试
-./build/backtest_server         # 启动服务器（默认 8002）
-./build/backtest_server 9000    # 指定端口
+./build/backtest_tests          # unit tests
+./build/backtest_server         # start server (default :8002)
+./build/backtest_server 9000    # pick a port
 ```
 
-## 架构
+## Architecture
 
 ```
              ┌──────────────────────────────────┐
@@ -30,75 +33,96 @@ cmake --build build -j8
                               │
              ┌────────────────▼─────────────────┐
              │  BacktestEngine                  │
-             │  逐 bar 事件循环：                  │
-             │    settle_t1() → mark_to_market   │
-             │    → RiskManager 检查止损          │
-             │    → strategy.on_bar(ctx)         │
-             │    → 订单排队到 N+1 开盘成交         │
+             │  per-bar event loop:             │
+             │    settle_t1() → mark_to_market  │
+             │    → RiskManager stop-loss check │
+             │    → strategy.on_bar(ctx)        │
+             │    → orders queued to N+1 open   │
              └───┬──────────┬──────────┬────────┘
                  │          │          │
        ┌─────────▼──┐  ┌────▼─────┐  ┌─▼──────────┐
        │ IStrategy  │  │ Portfolio│  │ Metrics    │
-       │ 纯虚基类     │  │ 仓位/现金 │  │ 19 项指标   │
-       │ 10 个实现   │  │ T+1 冻结  │  │ 夏普/回撤等 │
+       │ pure vtbl  │  │ pos/cash │  │ 19 metrics │
+       │ 10 impls   │  │ T+1 lock │  │ sharpe/dd  │
        └────────────┘  └──────────┘  └────────────┘
 ```
 
-| 文件 | 职责 |
+| File | Responsibility |
 |---|---|
 | `include/backtest/types.h` | `Bar` / `Order` / `Fill` / `Position` / `EquitySnapshot` / `CommissionConfig` / `MarketRules` |
-| `include/backtest/strategy_base.h` | `IStrategy` 纯虚基类——`name()` / `description()` / `param_schema()` / `on_bar()` |
-| `include/backtest/strategy_context.h` | 传给策略的只读上下文（历史 bar、当前持仓、现金） |
-| `src/engine.cpp` | 逐 bar 事件循环、订单撮合、T+1 结算 |
-| `src/portfolio.cpp` | 仓位管理、现金追踪、可卖数量冻结/解冻 |
-| `src/risk_manager.cpp` | 固定止损、追踪止损、单标的仓位上限、总仓位上限 |
-| `src/metrics.cpp` | 收益率、波动率、最大回撤、夏普、索提诺、胜率、盈亏比 |
-| `src/data_loader.cpp` | JSON / CSV 载入，以及测试用的模拟数据生成 |
-| `src/server.cpp` | REST API 路由 |
+| `include/backtest/strategy_base.h` | `IStrategy` pure virtual base — `name()` / `description()` / `param_schema()` / `on_bar()` |
+| `include/backtest/strategy_context.h` | Read-only context handed to strategies (bar history, current position, cash) |
+| `src/engine.cpp` | Per-bar event loop, order execution, T+1 settlement |
+| `src/portfolio.cpp` | Position management, cash tracking, sellable-quantity freeze/unfreeze |
+| `src/risk_manager.cpp` | Fixed stop-loss, trailing stop, per-symbol position cap, total position cap |
+| `src/metrics.cpp` | Returns, volatility, max drawdown, Sharpe, Sortino, win rate, profit factor |
+| `src/data_loader.cpp` | JSON / CSV loading, plus synthetic data generation for tests |
+| `src/server.cpp` | REST API routing |
 
-## 内置策略
+---
 
-| name | 说明 | 主要参数 |
+## Built-in strategies
+
+| name | Description | Key parameters |
 |---|---|---|
-| `MA_CROSS` | 均线交叉：短期均线上穿长期均线买入，下穿卖出 | `fast_period=5` `slow_period=20` |
-| `MOMENTUM` | 动量：过去 N 天涨幅超阈值买入，跌幅超阈值卖出 | `lookback=20` `buy_threshold=0.05` `sell_threshold=-0.03` |
-| `MACD` | DIF 上穿 DEA 买入，下穿卖出 | `fast_period=12` `slow_period=26` `signal_period=9` |
-| `RSI` | RSI 低于超卖区回升买入，高于超买区回落卖出 | `period=14` `oversold=30` `overbought=70` |
-| `KDJ` | K 线低位上穿 D 线买入，高位下穿卖出 | `n=9` `m1=3` `m2=3` `oversold=20` `overbought=80` |
-| `BOLLINGER` | 价格触及下轨反弹买入，触及上轨回落卖出 | `period=20` `num_std=2.0` |
-| `COMBO` | 多个子策略加权融合信号，超过阈值触发 | `threshold=0.5` `sub_strategies=[{name,weight,params}]` |
-| `PAIRS` | 配对交易（两条腿轮动，long-only），按价差 z-score 切换 | `symbol2` `lookback=60` `entry_z=2.0` `exit_z=0.5` |
-| `SIGNAL` | 外部信号回放：按 `[{date, action, price?, weight?}]` 序列成交 | —（走 `/run_signals`） |
-| `PORTFOLIO_SIGNAL` | 组合信号回放：每标的一条信号序列，**共享一份资金** | —（走 `/run_portfolio`） |
+| `MA_CROSS` | Moving-average cross: buy when fast crosses above slow, sell on cross below | `fast_period=5` `slow_period=20` |
+| `MOMENTUM` | Buy when the N-day return exceeds a threshold, sell when it falls below one | `lookback=20` `buy_threshold=0.05` `sell_threshold=-0.03` |
+| `MACD` | Buy when DIF crosses above DEA, sell on cross below | `fast_period=12` `slow_period=26` `signal_period=9` |
+| `RSI` | Buy on recovery out of oversold, sell on decline out of overbought | `period=14` `oversold=30` `overbought=70` |
+| `KDJ` | Buy when K crosses above D in the low zone, sell on cross below in the high zone | `n=9` `m1=3` `m2=3` `oversold=20` `overbought=80` |
+| `BOLLINGER` | Buy on a bounce off the lower band, sell on a fade off the upper band | `period=20` `num_std=2.0` |
+| `COMBO` | Weighted blend of sub-strategy signals, fires past a threshold | `threshold=0.5` `sub_strategies=[{name,weight,params}]` |
+| `PAIRS` | Pairs trading (two legs, long-only rotation) driven by spread z-score | `symbol2` `lookback=60` `entry_z=2.0` `exit_z=0.5` |
+| `SIGNAL` | External signal replay: fills a `[{date, action, price?, weight?}]` sequence | — (via `/run_signals`) |
+| `PORTFOLIO_SIGNAL` | Portfolio signal replay: one signal sequence per symbol, **sharing one cash pool** | — (via `/run_portfolio`) |
 
-所有策略共用 `position_pct`（仓位比例，默认 `0.95`）。
+All strategies share `position_pct` (fraction of capital per entry, default `0.95`).
 
-> `GET /api/strategies` 返回的是**前 8 个**——`SIGNAL` 和 `PORTFOLIO_SIGNAL` 不由 `strategy` 字段选择，而是由 `/run_signals`、`/run_portfolio` 两个专用端点隐式装配，所以不进策略目录。
+> `GET /api/strategies` returns the **first 8**. `SIGNAL` and `PORTFOLIO_SIGNAL` are not
+> selected via the `strategy` field — they are installed implicitly by the `/run_signals` and
+> `/run_portfolio` endpoints, so they are not listed in the catalog.
 
-## 市场预设
+### One known defect
 
-`market` 字段决定手续费、印花税、滑点和最小交易单位。四套预设写在 `types.h` 的工厂方法里：
+`KDJ`'s overbought/oversold filter has its two thresholds swapped relative to its own
+documentation (`kdj_strategy.cpp:47-50`). Because K spends most of its time inside
+(20, 80), both filters are near-always true, so the strategy degenerates to a bare K/D cross
+with no zone filter — and the `oversold` / `overbought` parameters are simultaneously
+*inverted in meaning* and *nearly inert*. Tracked, not yet fixed, because the fix changes
+returned numbers and therefore belongs in its own change.
 
-| market | 佣金率 | 印花税 | 最低佣金 | 默认滑点 | 一手 |
+---
+
+## Market presets
+
+The `market` field selects commission, stamp duty, slippage and lot size. Four presets live in
+factory methods in `types.h`:
+
+| market | Commission | Stamp duty | Min commission | Default slippage | Lot |
 |---|---|---|---|---|---|
-| `a_share` (默认) | 万 2.5 | 千 1（仅卖出） | 5.0 | 0.1% | 100 |
-| `us` | 万 1 | 无 | 1.0 | 0.05% | 1 |
-| `hk` | 万 5 | 千 1（双边） | 5.0 | 0.1% | 1 |
-| `crypto` | 千 1（taker） | 无 | 无 | 0.05% | 1 |
+| `a_share` (default) | 2.5 bps | 10 bps (sell only) | 5.0 | 0.1% | 100 |
+| `us` | 1 bp | none | 1.0 | 0.05% | 1 |
+| `hk` | 5 bps | 10 bps (both sides) | 5.0 | 0.1% | 1 |
+| `crypto` | 10 bps (taker) | none | none | 0.05% | 1 |
 
-`slippage_pct` 可在请求里显式覆盖；`risk_config` 里的 `max_position_pct`（单标的上限）与 `max_total_position_pct`（总仓位上限）是**两条独立约束，引擎取更严的那个**——取 `max` 会让「必须留 20% 现金」这条保护静默失效。
+`slippage_pct` can be overridden explicitly per request. In `risk_config`,
+`max_position_pct` (per-symbol cap) and `max_total_position_pct` (total cap) are **two
+independent constraints and the engine takes the stricter one** — taking the `max` would
+silently disable a "keep 20% in cash" guard.
+
+---
 
 ## REST API
 
 ### `GET /api/strategies`
 
-返回策略清单及其参数 schema。
+Returns the strategy catalog and each one's parameter schema.
 
 ```bash
 curl http://127.0.0.1:8002/api/strategies
 ```
 
-### `POST /api/backtest/run` — 单标的策略回测
+### `POST /api/backtest/run` — single-symbol strategy backtest
 
 ```jsonc
 {
@@ -108,8 +132,8 @@ curl http://127.0.0.1:8002/api/strategies
   "bars": [{ "date": "2025-01-02", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000000 }],
   "initial_capital": 100000,
   "market": "us",              // us | hk | a_share | crypto
-  "slippage_pct": 0.001,       // 可选，缺省用市场默认
-  "risk_config": {             // 可选
+  "slippage_pct": 0.001,       // optional; market default otherwise
+  "risk_config": {             // optional
     "enabled": true,
     "stop_loss_pct": 0.05,
     "trailing_stop": true,
@@ -117,16 +141,17 @@ curl http://127.0.0.1:8002/api/strategies
     "max_position_pct": 1.0,
     "max_total_position_pct": 0.8
   },
-  "start_date": "2025-01-01",  // 可选
-  "end_date":   "2025-12-31"   // 可选
+  "start_date": "2025-01-01",  // optional
+  "end_date":   "2025-12-31"   // optional
 }
 ```
 
-> `bars` 缺省时会生成模拟数据，方便快速试跑。
+> If `bars` is omitted, synthetic data is generated so you can try it quickly.
 
-### `POST /api/backtest/run_signals` — 外部信号回放
+### `POST /api/backtest/run_signals` — external signal replay
 
-把策略换成一条信号序列，撮合/费用/滑点/T+1 全部复用同一套引擎。`bars` **必填**。
+Swaps the strategy for a signal sequence; execution, fees, slippage and T+1 all reuse the same
+engine. `bars` is **required** here.
 
 ```jsonc
 {
@@ -138,11 +163,13 @@ curl http://127.0.0.1:8002/api/strategies
 }
 ```
 
-`action` 大小写不敏感；`weight` 缺省 `0.95`；`price` 缺省即市价单。
+`action` is case-insensitive; `weight` defaults to `0.95`; omitting `price` means a market order.
 
-### `POST /api/backtest/run_portfolio` — 组合回测
+### `POST /api/backtest/run_portfolio` — portfolio backtest
 
-N 个标的**共享同一份现金**。某条腿只给 `bars` 不给 `signals` 是合法的——那个标的只当行情背景（比如配对交易的另一条腿），不产生订单。
+N symbols **share one cash pool**. A leg with `bars` but no `signals` is legal — that symbol
+acts purely as market background (for instance the other leg of a pairs trade) and generates
+no orders.
 
 ```jsonc
 {
@@ -156,7 +183,7 @@ N 个标的**共享同一份现金**。某条腿只给 `bars` 不给 `signals` �
 }
 ```
 
-### 响应格式（三个端点一致）
+### Response shape (identical across all three endpoints)
 
 ```jsonc
 {
@@ -177,26 +204,72 @@ N 个标的**共享同一份现金**。某条腿只给 `bars` 不给 `signals` �
   "trades": [{ "order_id": "...", "symbol": "...", "side": "BUY", "price": ..., "quantity": ...,
                "commission": ..., "slippage": ..., "date": "...", "reason": "signal" }],
 
-  // ── 不静默：下面三个字段让调用方能核对回测到底跑了什么 ──
-  "dropped_last_bar_orders": 0,                       // 最后一根 bar 因无「次日开盘」被丢弃的挂单数
-  "bar_coverage": { "AAPL": 251 },                    // 每标的实际有多少天有 bar（缺 bar ≠ 数据是 0）
-  "cash_contention": { "days": 3, "trimmed_notional": 8200.0 }  // 资金竞争导致的等比缩减
+  // ── Nothing silent: these let the caller verify what the backtest actually did ──
+  "dropped_last_bar_orders": 0,                       // orders dropped on the last bar for lack of a "next open"
+  "bar_coverage": { "AAPL": 251 },                    // days each symbol actually had a bar (a missing bar is not a zero)
+  "cash_contention": { "days": 3, "trimmed_notional": 8200.0 }  // proportional trimming from cash competition
 }
 ```
 
-`trades[].reason` 取值：`signal` / `stop_loss` / `trailing_stop`。
+`trades[].reason` is one of `signal` / `stop_loss` / `trailing_stop`.
 
-> ⚠️ `metrics.total_trades` 数的是**完成的往返**（一买一卖算一次），不是 `trades` 数组的长度——最后一笔还没平的持仓不计入。
-> ⚠️ `profit_factor` 在**零亏损交易**时被置为 `0.0`（除零保护），不是真的等于 0；判断时要先看 `losing_trades`。
+> ⚠️ `metrics.total_trades` counts **completed round-trips** (one buy plus one sell), not the
+> length of the `trades` array — a still-open final position is not counted.
+> ⚠️ `profit_factor` is set to `0.0` when there are **zero losing trades** (divide-by-zero
+> guard), which does not mean it is actually zero. Check `losing_trades` first.
 
-## 几个刻意的设计
+---
 
-**信号在次日开盘成交。** 第 N 根 bar 上产生的信号，一律用第 N+1 根 bar 的开盘价成交。用当天收盘价成交当天的信号是最常见的前视偏差来源，这里从引擎层面堵死。
+## Deliberate design choices
 
-**T+1 是真建模的，不是注释。** `Position` 同时有 `quantity` 和 `available` 两个字段，当日买入的份额进 `quantity` 但不进 `available`，次日开盘 `settle_t1()` 才解冻。市场规则（`MarketRules.lot_size`）也按市场查表——A 股一手 100 股，加密货币一手 1 个单位。
+**Signals fill at the next open.** A signal produced on bar N is always filled at bar N+1's
+open. Filling today's signal at today's close is the most common source of look-ahead bias,
+and it is blocked at the engine level rather than left to strategy authors.
 
-**日期窗口空了报 400 而不是跑全量。** 调用方给的 `[start_date, end_date]` 里一根 bar 都没有，是**输入**问题，抛 `EmptyDateRange` → HTTP 400。静默跑全量数据再回 200，等于对调用方撒谎。
+**T+1 is modeled for real, not in a comment.** `Position` carries both `quantity` and
+`available`. Shares bought today enter `quantity` but not `available`; `settle_t1()` unfreezes
+them at the next open. Lot size is looked up per market too (`MarketRules.lot_size`) —
+100 shares for A-shares, 1 unit for crypto.
 
-**组合回测拒绝重复 symbol。** `load_data` 是后者覆盖前者，静默塌成一条腿会让「10 个标的的组合」悄悄变成 3 个，而收益率看上去一切正常。所以重复 symbol 直接 400。
+**An empty date window returns 400 instead of running on everything.** If the caller's
+`[start_date, end_date]` contains no bars at all, that is an **input** problem:
+`EmptyDateRange` is thrown → HTTP 400. Silently running the full dataset and returning 200
+would be lying to the caller.
 
-**三个端点共用同一套配置解析。** `commission_of()` / `risk_from_json()` / `market_rules_of()` 只有一份。曾经某个端点自己抄了一份 inline 逻辑，结果是那个端点读不到 `max_total_position_pct`、也拿不到 `MarketRules`——配了总仓位上限却不生效，一手仍然按 100 股算。
+**Portfolio backtests reject duplicate symbols.** `load_data` overwrites, so a silent collapse
+would turn "a 10-symbol portfolio" into 3 while the returns still look perfectly normal.
+Duplicate symbols therefore return 400.
+
+**All three endpoints share one config parser.** There is exactly one `commission_of()` /
+`risk_from_json()` / `market_rules_of()`. One endpoint once carried its own inlined copy, and
+the result was that it silently ignored `max_total_position_pct` and never received
+`MarketRules` — a configured total-position cap that did nothing, and lot size still computed
+as 100 shares.
+
+---
+
+## Testing
+
+```bash
+./build/backtest_tests                                        # 87 cases
+./build/backtest_tests --gtest_filter='GoldenIndicator*'      # indicator golden fixture
+```
+
+### The indicator golden fixture
+
+`tests/data/indicator_golden.json` pins `macd` / `rsi` / `kdj` / `bollinger` / `sma` /
+`stddev` on **every bar** of four series — 180 real daily bars plus three constructed series
+that force specific branches (flat bars hit `kdj`'s exact `hhv == llv` comparison; monotonic
+series hit `rsi`'s `avg_loss == 0 → 100.0` path and its mirror).
+
+Each value is stored as the **bit pattern** of the double, not a decimal, and compared as an
+integer. `EXPECT_DOUBLE_EQ` is deliberately not used: it allows 4 ULPs of slack, which is
+exactly the error class this fixture exists to catch. Measured — rewriting MACD's EMA
+recurrence into the algebraically identical `p + α(x − p)` form produces 585 differing
+fields, and **51 of them (8.7%) are within 4 ULPs**, i.e. `EXPECT_DOUBLE_EQ` would have passed
+them silently.
+
+The fixture was captured from the current naive implementations *before* any rewrite, which is
+the only ordering under which it can prove anything. The generator is a separate target
+(`indicator_golden_gen`) rather than a `--regen` flag on the test, so that the test has no
+ability to overwrite its own expectations.
