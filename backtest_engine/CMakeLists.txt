@@ -193,6 +193,7 @@ set(TEST_SOURCES
     tests/test_portfolio_engine.cpp
     tests/test_pairs_strategy.cpp
     tests/test_indicator_golden.cpp
+    tests/test_kdj_strategy.cpp
 )
 
 add_executable(backtest_tests

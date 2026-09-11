@@ -5,7 +5,7 @@ server (default `:8002`).
 
 *[中文版 / Chinese version](README.zh-CN.md)*
 
-**~7.4k lines of C++ · 10 built-in strategies · 87 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
+**~7.4k lines of C++ · 10 built-in strategies · 92 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
 
 ---
 
@@ -82,14 +82,48 @@ All strategies share `position_pct` (fraction of capital per entry, default `0.9
 > selected via the `strategy` field — they are installed implicitly by the `/run_signals` and
 > `/run_portfolio` endpoints, so they are not listed in the catalog.
 
-### One known defect
+### Fixed: KDJ's zone filter had its thresholds swapped
 
-`KDJ`'s overbought/oversold filter has its two thresholds swapped relative to its own
-documentation (`kdj_strategy.cpp:47-50`). Because K spends most of its time inside
-(20, 80), both filters are near-always true, so the strategy degenerates to a bare K/D cross
-with no zone filter — and the `oversold` / `overbought` parameters are simultaneously
-*inverted in meaning* and *nearly inert*. Tracked, not yet fixed, because the fix changes
-returned numbers and therefore belongs in its own change.
+`KDJ`'s overbought/oversold filter used to have its two thresholds swapped relative to its own
+documentation:
+
+```cpp
+// before
+golden_cross = ... && (result.k < overbought_);   // k < 80, i.e. "not overbought"
+death_cross  = ... && (result.k > oversold_);     // k > 20, i.e. "not oversold"
+```
+
+Because K spends most of its time inside (20, 80), both filters were near-always true, so the
+strategy degenerated to a bare K/D cross with no zone filter — and the `oversold` /
+`overbought` parameters were simultaneously *inverted in meaning* and *nearly inert*. Anyone
+tuning them got the opposite of the documented effect.
+
+Two things were fixed together:
+
+1. The thresholds were swapped back, making the code agree with `description()`, the parameter
+   schema, this README, and `benchmarks/python_reference`'s implementation.
+2. An `initialized_` guard was added, as `MACDStrategy` already had. Without it, `prev_k_` and
+   `prev_d_` both start at 50.0 while the `bar_index < n_` early return never updates them —
+   so on the first evaluated bar `prev_k_ <= prev_d_` and `prev_k_ >= prev_d_` are *both* true,
+   fabricating a cross against invented previous values.
+
+**Confirmation that the attribution was right**: on the same synthetic data, C++ KDJ trade
+counts went from 160 / 392 / 1,674 (at 1k / 2.5k / 10k bars) to **3 / 3 / 13** — and the Python
+reference on that same data gives 3 / 3 / 13. A 53–131× workload divergence became an exact
+match, which is strong evidence the divergence came from those two thresholds and nothing else.
+
+`tests/test_kdj_strategy.cpp` adds five cases. Before this, `grep -riE "kdj" tests/` returned
+nothing at all — the defect had no protection in either direction: nothing found it, and
+nothing would have stopped it being reintroduced. Three of the five were verified to go red
+while the defect was present (the other two cover intended behavior and the parameter schema).
+
+One related issue is **not** fixed: `prev_k_` / `prev_d_` / `initialized_` are cross-bar state
+held on the strategy object, while `BacktestEngine` shares one strategy instance across all
+symbols in a portfolio backtest (see the warning at `engine.cpp:37-43`). Running KDJ
+multi-symbol would let state bleed between symbols. Moving that state per-symbol is a
+structural change and does not belong in a threshold fix; today no endpoint reaches that path
+(`/run` installs a single-symbol strategy, `/run_portfolio` always installs
+`PortfolioSignalStrategy`).
 
 ---
 
@@ -251,7 +285,7 @@ as 100 shares.
 ## Testing
 
 ```bash
-./build/backtest_tests                                        # 87 cases
+./build/backtest_tests                                        # 92 cases
 ./build/backtest_tests --gtest_filter='GoldenIndicator*'      # indicator golden fixture
 ```
 

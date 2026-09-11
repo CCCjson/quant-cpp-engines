@@ -451,9 +451,9 @@ into pandas scalar indexing (H5) — the classic symptom of a hot path falling b
 interpreter and object layer. Same library, and using it right versus wrong differs by
 376×.
 
-**3. Cost to write and change** — 1,431 lines vs 7,875 lines
+**3. Cost to write and change** — 1,431 lines vs 8,158 lines
 
-What the Python reference engine does in 1,431 lines, the C++ engine takes 7,875
+What the Python reference engine does in 1,431 lines, the C++ engine takes 8,158
 lines to do (the latter does more — risk management, market rules, portfolio backtesting and
 six additional strategies — so this comparison is a rough order-of-magnitude reference, not a
 like-for-like line count).
@@ -474,9 +474,13 @@ pre-computed indicator columns), and exactly the direction the current C++ engin
 
 ---
 
-## An example that must not be compared
+## An example that must not be compared — since diagnosed and fixed
 
 `KDJ` appears in the tables above, but **its numbers must not be read as a speed comparison.**
+
+> ✅ **This defect has been fixed** (`kdj_strategy.cpp`). The table and analysis below are the
+> **pre-fix** state, kept verbatim because they are the most valuable methodological lesson of
+> the investigation. Post-fix measurements are at the end of this section.
 
 | Bars | C++ fills | Python fills |
 |---|---|---|
@@ -506,6 +510,28 @@ magnitude.
 > This repository's benchmark therefore has a built-in workload check (comparing fill counts and
 > final equity), flagging mismatches — otherwise it is very easy to compare two different
 > things all the way to a beautiful conclusion.
+
+### Measured after the fix
+
+With the two C++ thresholds corrected (now consistent with `description()`, the parameter
+schema, the README, and the Python reference implementation), the workloads on the same
+synthetic data **align exactly**:
+
+| Bars | C++ fills (before) | C++ fills (after) | Python fills |
+|---|---|---|---|
+| 1,000 | 160 | **3** | 3 |
+| 2,500 | 392 | **3** | 3 |
+| 10,000 | 1,674 | **13** | 13 |
+
+They used to differ by 53–131×; now they match one for one. That also confirms the attribution
+was right: the divergence really did come from those two swapped thresholds and nothing else.
+
+⚠️ The fill-count table at the start of this section is still pre-fix data —
+`results/backtest.json` is the output of a run that predates the fix, and rerunning the full
+benchmark would also move every Python-side number (this machine's pandas version differs from
+the recorded one), so it is left for the next complete re-measurement. The fix itself is guarded
+by five cases in `tests/test_kdj_strategy.cpp`, three of which were **verified to go red while
+the defect was present**.
 
 ---
 
@@ -711,8 +737,12 @@ Ordered by value, all actionable:
    incremental maintenance so `get_depth` no longer grows with book depth. See the order book
    section above.
 
-3. **`kdj_strategy.cpp`'s overbought/oversold filter is inverted.**
-   The code contradicts its own comment; the oversold filter never takes effect.
+3. ~~**`kdj_strategy.cpp`'s overbought/oversold filter is inverted.**~~
+   ✅ **Done.** The two thresholds were swapped back, and an `initialized_` guard was added
+   (as `MACDStrategy` already had) — without it the first evaluated bar fabricates a cross
+   against the seeded 50.0 previous values. After the fix, C++ and Python KDJ workloads match
+   one for one (3/3, 3/3, 13/13; before the fix, 160/392/1674 against 3/3/13). Five new cases
+   in `tests/test_kdj_strategy.cpp` — before this, `grep -riE "kdj" tests/` returned nothing.
 
 4. **`ctx.sma()` is also a naive O(period) re-summation.** It could become an O(1) rolling sum.
    It does not appear in the tables above because the periods are small (5/20), which masks the
