@@ -651,10 +651,26 @@ Python 侧注释与代码一致。
 
 | 指标 | 加索引前 | 加索引后 | 变化 |
 |---|---|---|---|
-| p50 | {cancel_before['latency']['p50_ns']:,.0f} ns | **{cancel['latency']['p50_ns']:,.0f} ns** | **{cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}×** |
-| p99 | {cancel_before['latency']['p99_ns']:,.0f} ns | {cancel['latency']['p99_ns']:,.0f} ns | {cancel_before['latency']['p99_ns'] / cancel['latency']['p99_ns']:.0f}× |
-| p99.9 | {cancel_before['latency']['p999_ns']:,.0f} ns | {cancel['latency']['p999_ns']:,.0f} ns | {cancel_before['latency']['p999_ns'] / cancel['latency']['p999_ns']:.0f}× |
+| **摊销** | {cancel_before['amortized_ns']:,.0f} ns | **{cancel['amortized_ns']:,.0f} ns** | **{cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×** |
+| p50 | {cancel_before['latency']['p50_ns']:,.0f} ns | {cancel['latency']['p50_ns']:,.0f} ns ⚠️ | {cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}× |
+| p99 | {cancel_before['latency']['p99_ns']:,.0f} ns | {cancel['latency']['p99_ns']:,.0f} ns ⚠️ | —— |
+| p99.9 | {cancel_before['latency']['p999_ns']:,.0f} ns | {cancel['latency']['p999_ns']:,.0f} ns ⚠️ | —— |
 | 撤单/下单 p50 | {cancel_before['latency']['p50_ns'] / sub_before['latency']['p50_ns']:.1f}× | {cancel['latency']['p50_ns'] / sub['latency']['p50_ns']:.2f}× | —— |
+
+**为什么头条用摊销值而不是 p50。** 改完之后撤单快到了
+{cancel['latency']['p50_clock_ticks']:.1f} 个时钟 tick（本机 steady_clock 粒度实测
+{ob['clock_granularity_ns']:.0f} ns），单次测量的量化相对误差约
+±{cancel['latency']['p50_quantization_rel_err'] * 100:.0f}% —— 打 ⚠️ 的那几行尾数
+是量化产物，不是信号。改之前 p50 有
+{cancel_before['latency']['p50_clock_ticks']:,.0f} 个 tick，完全可信；改之后不再可信。
+
+所以这次的可信倍数是**摊销值的 {cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×**，
+而不是 p50 算出来的 {cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}×。
+后者看着更好看，但它一部分来自「被测对象快到测不准了」，把它当结论就是自欺。
+
+两份数据都是用**同一版** benchmark 程序测的（都带预热、都实测时钟粒度）：
+改前那份是把当前的 `bench_orderbook.cpp` 拿到改动前的提交上跑出来的。
+harness 不同的 before/after 不可比，这一点比多报一个倍数重要。
 
 改动是生产级 LOB 的标准做法：一张 `order_id → (方向, 价位)` 的哈希表，
 撤单变成一次哈希查找加该档内的短扫描。
@@ -777,8 +793,9 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
    增量版的参考实现就在 [`bench_backtest.cpp`](bench_backtest.cpp) 里，已验证逐位等价。
 
 2. ~~**`limit_order_book.cpp` 的 `cancel_order` 加 `order_id` 索引。**~~
-   ✅ **已完成。** 撤单 p50 从 {cancel_before['latency']['p50_ns']:,.0f} ns 降到
-   {cancel['latency']['p50_ns']:,.0f} ns（**{cancel_before['latency']['p50_ns'] / cancel['latency']['p50_ns']:.0f}×**），
+   ✅ **已完成。** 撤单摊销耗时从 {cancel_before['amortized_ns']:,.0f} ns 降到
+   {cancel['amortized_ns']:,.0f} ns（**{cancel_before['amortized_ns'] / cancel['amortized_ns']:.0f}×**，
+   用摊销口径是因为改完之后 p50 已低于时钟分辨率），
    顺带把 `PriceLevel` 的聚合量改成增量维护，`get_depth` 不再随簿深增长。
    详见上面「订单簿」一节。
 

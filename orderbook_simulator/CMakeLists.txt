@@ -166,6 +166,9 @@ if(EXISTS ${BENCH_OB_SRC})
     target_include_directories(bench_orderbook PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
+    target_compile_definitions(bench_orderbook PRIVATE
+        BENCH_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+    )
     target_link_libraries(bench_orderbook PRIVATE
         orderbook_flags
         nlohmann_json::nlohmann_json

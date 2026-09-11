@@ -68,9 +68,62 @@ Percentiles percentiles(std::vector<double>& v) {
             v.empty() ? 0.0 : sum / v.size()};
 }
 
-json pct_json(Percentiles p) {
-    return {{"p50_ns", p.p50}, {"p90_ns", p.p90}, {"p99_ns", p.p99},
-            {"p999_ns", p.p999}, {"max_ns", p.max}, {"mean_ns", p.mean}};
+/*
+ * 时钟粒度实测。
+ *
+ * 为什么不写死 41.67ns：那是 macOS/24MHz 的值，Linux 上通常是 1ns。
+ * CI 现在两个平台都跑，写死会让另一个平台的可信度标注完全错掉。
+ * 实测办法：连续取时间戳，记下**最小的非零差值**，那就是这台机器上
+ * 时钟能分辨的最小单位。
+ */
+double clock_granularity_ns(int n = 200000) {
+    double best = 1e18;
+    for (int i = 0; i < n; ++i) {
+        auto a = Clock::now();
+        auto b = Clock::now();
+        double d = std::chrono::duration<double, std::nano>(b - a).count();
+        if (d > 0.0 && d < best) best = d;
+    }
+    return (best > 1e17) ? 0.0 : best;
+}
+
+json pct_json(Percentiles p, double granularity_ns) {
+    json j = {{"p50_ns", p.p50}, {"p90_ns", p.p90}, {"p99_ns", p.p99},
+              {"p999_ns", p.p999}, {"max_ns", p.max}, {"mean_ns", p.mean}};
+    /*
+     * 可信度标注。
+     *
+     * 逐次计时的值被量化到时钟粒度的整数倍。如果 p50 只有粒度的几倍，
+     * 那它的尾数就是量化产物而不是真实信号 —— 比如 macOS 上 get_depth 的
+     * p50 报 250ns，其实是「6 个 tick」，真实值在 229~271 之间。
+     *
+     * 这一点原来只写在文件头的注释里，结果 JSON 里没有任何痕迹，
+     * 于是生成的 README 会把 250/292/583 这种量化产物当成精确数字展示。
+     * 现在把判据连同粒度一起写进结果，让读数的人能自己判断。
+     */
+    j["clock_granularity_ns"] = granularity_ns;
+    if (granularity_ns > 0.0) {
+        const double ticks = p.p50 / granularity_ns;
+        j["p50_clock_ticks"] = ticks;
+        /*
+         * 阈值取 10 个 tick，理由是可算出来的而不是拍的：
+         * 单次测量的量化误差是 ±0.5 个 tick，相对误差 = 0.5 / ticks。
+         * ticks = 10 对应 ±5%，这是「还能当数字看」的边界；
+         * ticks = 3（本机 get_depth 的实际情形）对应 ±17%，
+         * 那时候 p50 的十位数已经没有意义了。
+         */
+        const double rel_err = 0.5 / ticks;
+        j["p50_quantization_rel_err"] = rel_err;
+        j["percentiles_quantization_limited"] = (ticks < 10.0);
+        if (ticks < 10.0) {
+            j["quantization_note"] =
+                "p50 只有 " + std::to_string(ticks) + " 个时钟 tick（粒度 " +
+                std::to_string(granularity_ns) + " ns），量化相对误差约 ±" +
+                std::to_string(rel_err * 100.0) +
+                "%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。";
+        }
+    }
+    return j;
 }
 
 /*
@@ -97,9 +150,37 @@ double timer_overhead_ns(int n = 200000) {
 // 20% 穿价 LIMIT（会吃对手盘），10% MARKET。
 // 这个配比是为了让簿既能长大、又持续有成交 —— 全是挂单的话测的是插入，
 // 全是市价单的话簿会被吃空，两种都不是真实盘口。
-json bench_submit(int n_orders, double overhead_ns) {
+json bench_submit(int n_orders, double overhead_ns, double granularity_ns) {
+    /*
+     * 预热。
+     *
+     * 原来三个用例都是从第 0 次迭代就开始计时，于是前若干次里混着一次性成本：
+     * 指令缓存冷、分支预测器没训练、allocator 的 arena 还没长起来、
+     * Session/deque 的首批堆分配。这些会抬高 p99/p999 —— 而这个 benchmark
+     * 的全部意义就在尾部分位数上。
+     *
+     * 预热用**另一个 Session**，不污染被测那一份的簿状态。
+     */
+    {
+        Session warm("warmup", "TEST");
+        warm.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 7u);
+        Lcg wr(1234567);
+        const int wn = std::max(2000, n_orders / 20);
+        for (int i = 0; i < wn; ++i) {
+            BookOrder o;
+            o.order_id = "w" + std::to_string(i);
+            o.side = (wr.next() % 2) ? Side::BUY : Side::SELL;
+            o.quantity = wr.range(100, 1000);
+            o.order_type = OrderType::LIMIT;
+            double off = wr.range(1, 150) * 0.01;
+            o.price = (o.side == Side::BUY) ? 100.0 - off : 100.0 + off;
+            o.timestamp = static_cast<int64_t>(i);
+            warm.submit_order(std::move(o));
+        }
+    }
+
     Session session("bench", "TEST");
-    session.seed_orders(5000, 100.0, 0.01, 2, 200);
+    session.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 20240824u);
 
     Lcg rng(20240824);
     std::vector<double> lat;
@@ -143,7 +224,8 @@ json bench_submit(int n_orders, double overhead_ns) {
     j["wall_seconds"] = secs;
     j["orders_per_sec"] = n_orders / secs;
     j["filled_quantity_total"] = filled_total;
-    j["latency"] = pct_json(percentiles(lat));
+    j["latency"] = pct_json(percentiles(lat), granularity_ns);
+    j["amortized_ns"] = std::chrono::duration<double, std::nano>(t_end - t_start).count() / n_orders;
     j["book_orders_after"] = session.get_stats(10).bid_depth + session.get_stats(10).ask_depth;
     return j;
 }
@@ -153,9 +235,16 @@ json bench_submit(int n_orders, double overhead_ns) {
 // get_depth 走的是价格树的前 N 档。簿里挂单从 1k 涨到 100k 时，
 // 这个查询会不会跟着变慢？—— 如果实现是对的，它应该只跟 levels 有关，
 // 跟簿总大小无关。这条曲线就是在验证这件事。
-json bench_depth(int book_size, double overhead_ns, int queries = 20000) {
+json bench_depth(int book_size, double overhead_ns, double granularity_ns,
+                 int queries = 20000) {
     Session session("depth", "TEST");
-    session.seed_orders(book_size, 100.0, 0.01, 2, 2000);
+    session.seed_orders(book_size, 100.0, 0.01, 2, 2000, 100, 1000, 31337u);
+
+    // 预热：先跑一批不计时的查询，把 icache / 分支预测器带热
+    for (int i = 0; i < 2000; ++i) {
+        volatile auto d = session.get_depth(10);
+        (void)d;
+    }
 
     std::vector<double> lat;
     lat.reserve(queries);
@@ -183,16 +272,35 @@ json bench_depth(int book_size, double overhead_ns, int queries = 20000) {
     j["bid_depth"] = st.bid_depth;
     j["ask_depth"] = st.ask_depth;
     j["queries"] = queries;
-    j["latency"] = pct_json(percentiles(lat));
+    j["latency"] = pct_json(percentiles(lat), granularity_ns);
     return j;
 }
 
 // ── 3. 撤单延迟 ───────────────────────────────────────────
 //
 // 挂一批远离盘口的单（保证不会被吃掉），再逐个撤，测撤单本身的成本。
-json bench_cancel(int n, double overhead_ns) {
+json bench_cancel(int n, double overhead_ns, double granularity_ns) {
+    // 预热：在另一个 session 上完整跑一遍「挂单 → 撤单」，
+    // 把索引哈希表的桶、deque 的堆块都先分配起来
+    {
+        Session warm("cancel_warm", "TEST");
+        std::vector<std::string> wids;
+        for (int i = 0; i < 2000; ++i) {
+            BookOrder o;
+            o.order_id = "cw" + std::to_string(i);
+            o.side = Side::BUY;
+            o.order_type = OrderType::LIMIT;
+            o.price = 50.0 - (i % 1000) * 0.01;
+            o.quantity = 100;
+            o.timestamp = static_cast<int64_t>(i);
+            wids.push_back(o.order_id);
+            warm.submit_order(std::move(o));
+        }
+        for (const auto& id : wids) warm.cancel_order(id);
+    }
+
     Session session("cancel", "TEST");
-    session.seed_orders(5000, 100.0, 0.01, 2, 200);
+    session.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 987654u);
 
     std::vector<std::string> ids;
     ids.reserve(n);
@@ -228,35 +336,90 @@ json bench_cancel(int n, double overhead_ns) {
     j["amortized_ns"] = std::chrono::duration<double, std::nano>(tb - ta).count() / n;
     j["orders"] = n;
     j["cancelled_ok"] = ok;
-    j["latency"] = pct_json(percentiles(lat));
+    j["latency"] = pct_json(percentiles(lat), granularity_ns);
     return j;
 }
 
 }  // namespace
 
+/*
+ * 环境元数据。
+ *
+ * 原来 orderbook.json **完全没有 environment 块** —— 于是 make_report.py 渲染
+ * 环境表时只能借 backtest.json 的那一份，两份数据可能来自不同机器、不同日期，
+ * 而读报告的人完全无从分辨。一份自称可复现的报告不该有这种缺口。
+ */
+json environment(double overhead_ns, double granularity_ns) {
+    json e;
+#if defined(__clang_version__)
+    e["compiler"] = std::string("clang ") + __clang_version__;
+#elif defined(__VERSION__)
+    e["compiler"] = std::string("gcc ") + __VERSION__;
+#else
+    e["compiler"] = "unknown";
+#endif
+#if defined(__APPLE__)
+    e["os"] = "macOS";
+#elif defined(__linux__)
+    e["os"] = "Linux";
+#else
+    e["os"] = "unknown";
+#endif
+#if defined(NDEBUG)
+    e["ndebug"] = true;
+#else
+    e["ndebug"] = false;
+#endif
+#if defined(BENCH_BUILD_TYPE)
+    e["cmake_build_type"] = BENCH_BUILD_TYPE;
+#endif
+#if defined(__OPTIMIZE__)
+    e["optimized"] = true;
+#else
+    e["optimized"] = false;
+#endif
+    e["clock"] = "std::chrono::steady_clock";
+    e["clock_granularity_ns"] = granularity_ns;
+    e["timer_overhead_ns"] = overhead_ns;
+    e["fp_contract"] = "off (见 CMakeLists 的 -ffp-contract=off)";
+    return e;
+}
+
 int main(int argc, char* argv[]) {
     const int scale = argc > 1 ? std::atoi(argv[1]) : 1;
 
-    double overhead = timer_overhead_ns();
-    std::cerr << "计时器开销基线（中位数）: " << overhead << " ns —— 已从所有延迟中扣除\n";
+    const double granularity = clock_granularity_ns();
+    const double overhead = timer_overhead_ns();
+    std::cerr << "时钟粒度（实测最小非零差值）: " << granularity << " ns\n";
+    std::cerr << "计时器开销基线（中位数）    : " << overhead << " ns";
+    if (overhead <= 0.0) {
+        std::cerr << "  ⚠️ 中位开销落在时钟粒度以下，扣除实际为 0";
+    }
+    std::cerr << "\n";
 
     json out;
     out["timer_overhead_ns"] = overhead;
+    out["clock_granularity_ns"] = granularity;
+    // 显式记录「扣除是否真的生效」。原来这里只有 timer_overhead_ns，
+    // 已提交的那次运行里它是 0.0，也就是什么都没扣 —— 但结果文件里看不出
+    // 这是「开销真的为零」还是「开销小于时钟粒度、测不出来」。
+    out["timer_overhead_subtraction_effective"] = (overhead > 0.0);
+    out["environment"] = environment(overhead, granularity);
 
     out["submit"] = json::array();
     for (int n : {50'000 * scale, 200'000 * scale}) {
         std::cerr << "  撮合吞吐 " << n << " 单...\n";
-        out["submit"].push_back(bench_submit(n, overhead));
+        out["submit"].push_back(bench_submit(n, overhead, granularity));
     }
 
     out["depth_query"] = json::array();
     for (int b : {1'000, 10'000, 100'000}) {
         std::cerr << "  深度查询 簿内 " << b << " 单...\n";
-        out["depth_query"].push_back(bench_depth(b, overhead));
+        out["depth_query"].push_back(bench_depth(b, overhead, granularity));
     }
 
     std::cerr << "  撤单延迟...\n";
-    out["cancel"] = bench_cancel(50'000 * scale, overhead);
+    out["cancel"] = bench_cancel(50'000 * scale, overhead, granularity);
 
     std::cout << out.dump(2) << std::endl;
     return 0;

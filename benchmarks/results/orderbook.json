@@ -1,95 +1,138 @@
 {
   "cancel": {
-    "amortized_ns": 148.35584,
+    "amortized_ns": 142.35916,
     "cancelled_ok": 50000,
     "latency": {
-      "max_ns": 9084.0,
-      "mean_ns": 91.7753,
+      "clock_granularity_ns": 41.0,
+      "max_ns": 16292.0,
+      "mean_ns": 85.7709,
+      "p50_clock_ticks": 2.048780487804878,
       "p50_ns": 84.0,
+      "p50_quantization_rel_err": 0.24404761904761904,
       "p90_ns": 167.0,
-      "p999_ns": 584.0,
-      "p99_ns": 292.0
+      "p999_ns": 792.0,
+      "p99_ns": 334.0,
+      "percentiles_quantization_limited": true,
+      "quantization_note": "p50 只有 2.048780 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±24.404762%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
     },
     "orders": 50000
   },
+  "clock_granularity_ns": 41.0,
   "depth_query": [
     {
-      "amortized_ns": 157.9604,
-      "ask_depth": 4233,
-      "bid_depth": 7538,
+      "amortized_ns": 149.06875,
+      "ask_depth": 8785,
+      "bid_depth": 7224,
       "book_size_requested": 1000,
       "latency": {
-        "max_ns": 3834.0,
-        "mean_ns": 137.018,
+        "clock_granularity_ns": 41.0,
+        "max_ns": 16209.0,
+        "mean_ns": 119.5845,
+        "p50_clock_ticks": 3.073170731707317,
         "p50_ns": 126.0,
-        "p90_ns": 168.0,
-        "p999_ns": 334.0,
-        "p99_ns": 209.0
+        "p50_quantization_rel_err": 0.1626984126984127,
+        "p90_ns": 126.0,
+        "p999_ns": 292.0,
+        "p99_ns": 168.0,
+        "percentiles_quantization_limited": true,
+        "quantization_note": "p50 只有 3.073171 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±16.269841%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
       },
       "queries": 20000
     },
     {
-      "amortized_ns": 163.33125,
-      "ask_depth": 15110,
-      "bid_depth": 17696,
+      "amortized_ns": 146.8854,
+      "ask_depth": 12955,
+      "bid_depth": 10547,
       "book_size_requested": 10000,
       "latency": {
-        "max_ns": 18793.0,
-        "mean_ns": 113.48225,
-        "p50_ns": 125.0,
-        "p90_ns": 126.0,
-        "p999_ns": 251.0,
-        "p99_ns": 168.0
-      },
-      "queries": 20000
-    },
-    {
-      "amortized_ns": 161.87705,
-      "ask_depth": 132822,
-      "bid_depth": 131207,
-      "book_size_requested": 100000,
-      "latency": {
-        "max_ns": 13084.0,
-        "mean_ns": 106.1244,
-        "p50_ns": 125.0,
+        "clock_granularity_ns": 41.0,
+        "max_ns": 10126.0,
+        "mean_ns": 101.9802,
+        "p50_clock_ticks": 2.048780487804878,
+        "p50_ns": 84.0,
+        "p50_quantization_rel_err": 0.24404761904761904,
         "p90_ns": 126.0,
         "p999_ns": 209.0,
-        "p99_ns": 126.0
+        "p99_ns": 126.0,
+        "percentiles_quantization_limited": true,
+        "quantization_note": "p50 只有 2.048780 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±24.404762%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
+      },
+      "queries": 20000
+    },
+    {
+      "amortized_ns": 150.9958,
+      "ask_depth": 137029,
+      "bid_depth": 142230,
+      "book_size_requested": 100000,
+      "latency": {
+        "clock_granularity_ns": 41.0,
+        "max_ns": 17043.0,
+        "mean_ns": 108.38425,
+        "p50_clock_ticks": 3.048780487804878,
+        "p50_ns": 125.0,
+        "p50_quantization_rel_err": 0.164,
+        "p90_ns": 126.0,
+        "p999_ns": 250.0,
+        "p99_ns": 126.0,
+        "percentiles_quantization_limited": true,
+        "quantization_note": "p50 只有 3.048780 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±16.400000%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
       },
       "queries": 20000
     }
   ],
+  "environment": {
+    "clock": "std::chrono::steady_clock",
+    "clock_granularity_ns": 41.0,
+    "cmake_build_type": "Release",
+    "compiler": "clang 17.0.0 (clang-1700.6.3.2)",
+    "fp_contract": "off (见 CMakeLists 的 -ffp-contract=off)",
+    "ndebug": true,
+    "optimized": true,
+    "os": "macOS",
+    "timer_overhead_ns": 41.0
+  },
   "submit": [
     {
-      "book_orders_after": 393824,
-      "filled_quantity_total": 6176535,
+      "amortized_ns": 1072.1025,
+      "book_orders_after": 426010,
+      "filled_quantity_total": 6183673,
       "latency": {
-        "max_ns": 423542.0,
-        "mean_ns": 1152.6048,
-        "p50_ns": 1001.0,
-        "p90_ns": 1584.0,
-        "p999_ns": 5126.0,
-        "p99_ns": 2543.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 169084.0,
+        "mean_ns": 983.71188,
+        "p50_clock_ticks": 21.365853658536587,
+        "p50_ns": 876.0,
+        "p50_quantization_rel_err": 0.023401826484018264,
+        "p90_ns": 1375.0,
+        "p999_ns": 3876.0,
+        "p99_ns": 2042.0,
+        "percentiles_quantization_limited": false
       },
       "orders": 50000,
-      "orders_per_sec": 802793.7221530929,
-      "wall_seconds": 0.0622825
+      "orders_per_sec": 932746.6356994783,
+      "wall_seconds": 0.053605125000000003
     },
     {
-      "book_orders_after": 833761,
-      "filled_quantity_total": 24396385,
+      "amortized_ns": 770.771665,
+      "book_orders_after": 831219,
+      "filled_quantity_total": 24393159,
       "latency": {
-        "max_ns": 1340250.0,
-        "mean_ns": 709.178285,
+        "clock_granularity_ns": 41.0,
+        "max_ns": 991792.0,
+        "mean_ns": 695.36879,
+        "p50_clock_ticks": 15.268292682926829,
         "p50_ns": 626.0,
-        "p90_ns": 875.0,
-        "p999_ns": 2917.0,
-        "p99_ns": 1334.0
+        "p50_quantization_rel_err": 0.03274760383386582,
+        "p90_ns": 834.0,
+        "p999_ns": 2000.0,
+        "p99_ns": 1251.0,
+        "percentiles_quantization_limited": false
       },
       "orders": 200000,
-      "orders_per_sec": 1277724.2851407335,
-      "wall_seconds": 0.156528292
+      "orders_per_sec": 1297401.092189864,
+      "wall_seconds": 0.154154333
     }
   ],
-  "timer_overhead_ns": 41.0
+  "timer_overhead_ns": 41.0,
+  "timer_overhead_subtraction_effective": true
 }

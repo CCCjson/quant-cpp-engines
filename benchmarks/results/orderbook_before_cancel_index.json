@@ -1,96 +1,136 @@
 {
   "cancel": {
-    "amortized_ns": 45004.025,
+    "amortized_ns": 44389.11,
     "cancelled_ok": 50000,
     "latency": {
-      "max_ns": 3063334.0,
-      "mean_ns": 44946.8275,
-      "p50_ns": 42209.0,
-      "p90_ns": 83667.0,
-      "p999_ns": 133250.0,
-      "p99_ns": 99709.0
+      "clock_granularity_ns": 41.0,
+      "max_ns": 363208.0,
+      "mean_ns": 44372.77532,
+      "p50_clock_ticks": 1029.4634146341464,
+      "p50_ns": 42208.0,
+      "p50_quantization_rel_err": 0.0004856899166034875,
+      "p90_ns": 82167.0,
+      "p999_ns": 126333.0,
+      "p99_ns": 97958.0,
+      "percentiles_quantization_limited": false
     },
     "orders": 50000
   },
+  "clock_granularity_ns": 41.0,
   "depth_query": [
     {
-      "amortized_ns": 233.8583,
-      "ask_depth": 4971,
-      "bid_depth": 4734,
+      "amortized_ns": 215.22085,
+      "ask_depth": 8785,
+      "bid_depth": 7224,
       "book_size_requested": 1000,
       "latency": {
-        "max_ns": 15793.0,
-        "mean_ns": 224.08725,
-        "p50_ns": 209.0,
-        "p90_ns": 251.0,
-        "p999_ns": 1042.0,
-        "p99_ns": 334.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 9083.0,
+        "mean_ns": 235.8201,
+        "p50_clock_ticks": 6.097560975609756,
+        "p50_ns": 250.0,
+        "p50_quantization_rel_err": 0.082,
+        "p90_ns": 250.0,
+        "p999_ns": 375.0,
+        "p99_ns": 292.0,
+        "percentiles_quantization_limited": true,
+        "quantization_note": "p50 只有 6.097561 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±8.200000%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
       },
       "queries": 20000
     },
     {
-      "amortized_ns": 259.69585,
-      "ask_depth": 17526,
-      "bid_depth": 17483,
+      "amortized_ns": 242.2917,
+      "ask_depth": 12955,
+      "bid_depth": 10547,
       "book_size_requested": 10000,
       "latency": {
-        "max_ns": 3876.0,
-        "mean_ns": 207.42175,
-        "p50_ns": 209.0,
-        "p90_ns": 209.0,
-        "p999_ns": 293.0,
-        "p99_ns": 251.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 5042.0,
+        "mean_ns": 230.8369,
+        "p50_clock_ticks": 6.097560975609756,
+        "p50_ns": 250.0,
+        "p50_quantization_rel_err": 0.082,
+        "p90_ns": 250.0,
+        "p999_ns": 333.0,
+        "p99_ns": 250.0,
+        "percentiles_quantization_limited": true,
+        "quantization_note": "p50 只有 6.097561 个时钟 tick（粒度 41.000000 ns），量化相对误差约 ±8.200000%，分位数的尾数是量化产物。判断真实平均成本请用 amortized_ns。"
       },
       "queries": 20000
     },
     {
-      "amortized_ns": 569.55,
-      "ask_depth": 135279,
-      "bid_depth": 138790,
+      "amortized_ns": 584.68125,
+      "ask_depth": 137029,
+      "bid_depth": 142230,
       "book_size_requested": 100000,
       "latency": {
-        "max_ns": 15334.0,
-        "mean_ns": 510.0551,
-        "p50_ns": 501.0,
-        "p90_ns": 542.0,
-        "p999_ns": 709.0,
-        "p99_ns": 584.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 6541.0,
+        "mean_ns": 587.6593,
+        "p50_clock_ticks": 14.21951219512195,
+        "p50_ns": 583.0,
+        "p50_quantization_rel_err": 0.03516295025728988,
+        "p90_ns": 625.0,
+        "p999_ns": 792.0,
+        "p99_ns": 708.0,
+        "percentiles_quantization_limited": false
       },
       "queries": 20000
     }
   ],
+  "environment": {
+    "clock": "std::chrono::steady_clock",
+    "clock_granularity_ns": 41.0,
+    "compiler": "clang 17.0.0 (clang-1700.6.3.2)",
+    "fp_contract": "off (见 CMakeLists 的 -ffp-contract=off)",
+    "ndebug": true,
+    "optimized": true,
+    "os": "macOS",
+    "timer_overhead_ns": 0.0
+  },
   "submit": [
     {
-      "book_orders_after": 411740,
-      "filled_quantity_total": 6184654,
+      "amortized_ns": 1283.5975,
+      "book_orders_after": 426010,
+      "filled_quantity_total": 6183673,
       "latency": {
-        "max_ns": 191459.0,
-        "mean_ns": 1399.34402,
-        "p50_ns": 1251.0,
-        "p90_ns": 1959.0,
-        "p999_ns": 6584.0,
-        "p99_ns": 2834.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 304542.0,
+        "mean_ns": 1215.61154,
+        "p50_clock_ticks": 25.414634146341463,
+        "p50_ns": 1042.0,
+        "p50_quantization_rel_err": 0.019673704414587333,
+        "p90_ns": 1583.0,
+        "p999_ns": 18917.0,
+        "p99_ns": 2375.0,
+        "percentiles_quantization_limited": false
       },
       "orders": 50000,
-      "orders_per_sec": 667517.751800212,
-      "wall_seconds": 0.074904375
+      "orders_per_sec": 779060.4141874693,
+      "wall_seconds": 0.064179875
     },
     {
-      "book_orders_after": 834399,
-      "filled_quantity_total": 24394725,
+      "amortized_ns": 960.475835,
+      "book_orders_after": 831219,
+      "filled_quantity_total": 24393159,
       "latency": {
-        "max_ns": 665626.0,
-        "mean_ns": 877.30376,
-        "p50_ns": 834.0,
-        "p90_ns": 1042.0,
-        "p999_ns": 4292.0,
-        "p99_ns": 1417.0
+        "clock_granularity_ns": 41.0,
+        "max_ns": 549541.0,
+        "mean_ns": 921.862125,
+        "p50_clock_ticks": 21.341463414634145,
+        "p50_ns": 875.0,
+        "p50_quantization_rel_err": 0.02342857142857143,
+        "p90_ns": 1083.0,
+        "p999_ns": 5083.0,
+        "p99_ns": 1459.0,
+        "percentiles_quantization_limited": false
       },
       "orders": 200000,
-      "orders_per_sec": 1041857.7227529188,
-      "wall_seconds": 0.191964791
+      "orders_per_sec": 1041150.6084377437,
+      "wall_seconds": 0.192095167
     }
   ],
-  "timer_overhead_ns": 41.0,
-  "_note": "加 order_id 索引之前的基线。保留它是为了让 README 能给出 before/after 对照，而不是只给一个修好之后的数字。由 bench_orderbook 在 commit c018a6d（差分测试落地）时的代码上跑出。"
+  "timer_overhead_ns": 0.0,
+  "timer_overhead_subtraction_effective": false,
+  "_note": "加 order_id 索引之前的基线。代码取自 commit c018a6d（差分测试落地、尚未改数据结构），但用的是**当前这一版 bench_orderbook.cpp**（带预热、带时钟粒度实测）——两边 harness 必须完全相同，否则 before/after 不可比。最初那次基线是在无预热的旧 harness 上测的，已弃用并重测。"
 }
