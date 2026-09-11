@@ -18,6 +18,8 @@
 #ifndef ORDERBOOK_TYPES_H     // "头文件保护"：防止同一个文件被 #include 两次
 #define ORDERBOOK_TYPES_H     // 如果已经定义过这个宏，就跳过整个文件
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <cstdint>   // int64_t — 64 位整数，用来存时间戳（纳秒级）
 #include <chrono>    // C++ 标准库的时间工具
@@ -236,17 +238,24 @@ inline int64_t now_ns() {
 }
 
 /// 生成简单的唯一 ID（基于时间戳 + 计数器）
+///
+/// ⚠️ 计数器必须是**原子的**。
+/// 原来是一个普通的函数内 static int64_t，`counter++` 在多线程下是数据竞争：
+/// 读-改-写不是原子操作，两个线程可能读到同一个值、各自 +1、写回同一个数，
+/// 于是**发出重复的 order_id**。而整套按 id 查找/撤单的逻辑（find_order、
+/// cancel_order、以及新加的 order_id 索引）全都假定 id 唯一。
+///
+/// 这不是理论风险：REST 服务器默认开 8+ 个工作线程，每个请求都会调到这里。
 inline std::string generate_id() {
-    // static 变量只初始化一次，之后每次调用都在原来的值上累加
-    // 这意味着 counter 的值在整个程序运行期间一直递增
-    static int64_t counter = 0;
-    counter++;
+    static std::atomic<std::int64_t> counter{0};
+    // fetch_add 返回**加之前**的值，所以 +1 让第一个 id 从 1 开始，与原行为一致
+    const std::int64_t n = counter.fetch_add(1, std::memory_order_relaxed) + 1;
     auto ts = now_ns();
 
     // std::to_string 把数字转成字符串
     // substr 截取字符串的一部分（这里取后 8 位，让 ID 短一些）
     std::string ts_str = std::to_string(ts);
-    std::string c_str = std::to_string(counter);
+    std::string c_str = std::to_string(n);
     // 取时间戳后 8 位 + 计数器，保证唯一
     return ts_str.substr(ts_str.size() > 8 ? ts_str.size() - 8 : 0) + c_str;
 }

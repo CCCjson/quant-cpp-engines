@@ -48,7 +48,7 @@ cmake --build build -j8
 | `market_impact.h` | 市场冲击模型（平方根律）：按参与率估算大单的滑价 |
 | `statistics.h` `.cpp` | 盘口统计：价差、相对价差（bps）、深度、买卖失衡、VWAP |
 | `session.h` `.cpp` | 一次独立实验：自带订单簿 + 撮合引擎 + 成交流水，可随机播种模拟真实盘口 |
-| `session_manager.h` `.cpp` | 多会话隔离，`unordered_map<string, unique_ptr<Session>>` |
+| `session_manager.h` `.cpp` | 多会话隔离，`unordered_map<string, shared_ptr<Session>>` + `shared_mutex`。`get_session` 返回 shared_ptr，使会话不会在请求使用期间被销毁（并发说明见英文版 Concurrency 一节） |
 | `server.h` `.cpp` | REST API 路由 |
 
 ### 已知问题

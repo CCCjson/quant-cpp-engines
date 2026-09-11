@@ -2,9 +2,10 @@ name: CI
 
 # 在此之前，122 个单元测试只在作者本机手跑过。
 #
-# 这个 workflow 有三个 job，价值从低到高：
+# 这个 workflow 有四个 job，价值从低到高：
 #   tests       —— 跨编译器 × 构建类型跑单元测试，防「只在我机器上能编」
 #   sanitizers  —— ASan + UBSan，抓内存错误与未定义行为
+#   tsan        —— ThreadSanitizer，抓数据竞争（与 ASan 互斥，故独立成 job）
 #   parity-gate —— 证明 C++ 引擎与 Python 参照引擎算的是同一件事
 #
 # parity-gate 是这里最重要的一个。它把「两个引擎的经济结果逐位相同」
@@ -67,6 +68,32 @@ jobs:
       # 进程直接 abort、退出码非 0，不会打一行日志继续跑然后骗过 CI
       - name: ASan/UBSan 构建并跑测试
         run: ./build.sh asan
+
+  # ────────────────────────────────────────────────────────────
+  # ThreadSanitizer：数据竞争
+  # ────────────────────────────────────────────────────────────
+  tsan:
+    name: tsan · 数据竞争
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 只建 orderbook_simulator。并发只存在于这一侧 ——
+      # REST 服务器默认开 8+ 个工作线程操作共享的 Session / SessionManager；
+      # 回测引擎是单线程的，把它也放进 TSan 只是白等编译。
+      #
+      # TSan 与 ASan 互斥（两者都要接管内存布局），所以是独立的一个 job
+      # 和独立的构建目录，而不是塞进上面那个 sanitizers。
+      - name: TSan 构建（仅订单簿）
+        run: |
+          cmake -S orderbook_simulator -B orderbook_simulator/build-tsan \
+                -DCMAKE_BUILD_TYPE=Debug -DENABLE_TSAN=ON
+          cmake --build orderbook_simulator/build-tsan --target orderbook_tests -j"$(nproc)"
+
+      # 跑全部用例而不只是并发那三个：TSan 也能抓到单线程代码里的
+      # 其它同步问题，而且全量在 CI 上只多几秒。
+      - name: 全部用例在 TSan 下
+        run: ./orderbook_simulator/build-tsan/orderbook_tests
 
   # ────────────────────────────────────────────────────────────
   # Parity 门禁：C++ 与 Python 参照引擎必须算出同一个结果

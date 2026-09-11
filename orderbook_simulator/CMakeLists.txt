@@ -82,6 +82,25 @@ if(ENABLE_SANITIZERS)
     message(STATUS "Sanitizers: ON (ASan + UBSan, 不可恢复)")
 endif()
 
+# ── ThreadSanitizer（可选，与 ASan 互斥）──
+# 用法：./build.sh tsan
+#
+# TSan 抓数据竞争。它和 ASan **不能同时开**（两者都要接管内存布局），
+# 所以是独立的一个选项，而不是塞进 ENABLE_SANITIZERS。
+#
+# 这个项目需要它：REST 服务器默认开 8+ 个工作线程，而并发安全是靠
+# 「每 session 一把锁 + 读写锁护表 + 原子 ID」保证的 —— 这类保证只有
+# TSan 能验证，靠读代码是看不住的。
+option(ENABLE_TSAN "开启 ThreadSanitizer（与 ENABLE_SANITIZERS 互斥）" OFF)
+if(ENABLE_TSAN)
+    if(ENABLE_SANITIZERS)
+        message(FATAL_ERROR "ENABLE_TSAN 与 ENABLE_SANITIZERS 不能同时开：TSan 和 ASan 互斥")
+    endif()
+    target_compile_options(orderbook_flags INTERFACE -fsanitize=thread -fno-omit-frame-pointer -g)
+    target_link_options(orderbook_flags INTERFACE -fsanitize=thread)
+    message(STATUS "ThreadSanitizer: ON")
+endif()
+
 # ============================================================
 # FetchContent — 自动下载第三方库
 # ============================================================

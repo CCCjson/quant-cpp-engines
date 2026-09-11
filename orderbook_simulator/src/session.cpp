@@ -3,6 +3,7 @@
  */
 
 #include "orderbook/session.h"
+#include <mutex>
 #include <random>    // 随机数生成器（C++11 标准库）
 #include <algorithm> // std::min, std::max
 
@@ -29,6 +30,7 @@ const std::string& Session::symbol() const {
 }
 
 DepthSnapshot Session::get_depth(int levels) const {
+    std::lock_guard<std::mutex> lk(mu_);
     return book_.get_depth(levels);
 }
 
@@ -38,6 +40,7 @@ const std::vector<Fill>& Session::get_fills() const {
 }
 
 std::vector<Fill> Session::get_recent_fills(int limit) const {
+    std::lock_guard<std::mutex> lk(mu_);
     // 取最后 N 笔成交
     if (limit <= 0 || all_fills_.empty()) {
         return {};
@@ -50,6 +53,7 @@ std::vector<Fill> Session::get_recent_fills(int limit) const {
 }
 
 BookStats Session::get_stats(int depth_levels) const {
+    std::lock_guard<std::mutex> lk(mu_);
     return Statistics::calculate(book_, all_fills_, depth_levels);
 }
 
@@ -63,6 +67,7 @@ double Session::estimate_impact(int quantity, double volatility, double daily_vo
 }
 
 std::optional<BookOrder> Session::find_order(const std::string& order_id) const {
+    std::lock_guard<std::mutex> lk(mu_);
     return book_.find_order(order_id);
 }
 
@@ -72,6 +77,7 @@ std::optional<BookOrder> Session::find_order(const std::string& order_id) const 
 // ============================================================
 
 MatchResult Session::submit_order(BookOrder order) {
+    std::lock_guard<std::mutex> lk(mu_);
     auto result = engine_.submit_order(book_, std::move(order));
 
     // 把新的成交记录追加到历史列表
@@ -83,6 +89,7 @@ MatchResult Session::submit_order(BookOrder order) {
 }
 
 bool Session::cancel_order(const std::string& order_id) {
+    std::lock_guard<std::mutex> lk(mu_);
     return book_.cancel_order(order_id);
 }
 
@@ -101,6 +108,7 @@ int Session::seed_orders(
     int max_qty,
     std::optional<std::uint32_t> seed
 ) {
+    std::lock_guard<std::mutex> lk(mu_);
     /*
      * 播种就是生成一堆随机的限价单，让订单簿看起来像真实的盘口。
      *

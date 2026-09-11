@@ -161,7 +161,7 @@ void Server::handle_create_session(const httplib::Request& req, httplib::Respons
 
     // 创建会话
     std::string sid = manager_.create_session(symbol);
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
 
     // 播种初始订单
     if (session && seed_count > 0) {
@@ -183,7 +183,7 @@ void Server::handle_get_depth(const httplib::Request& req, httplib::Response& re
     // req.matches[1] 获取路径中的第一个正则捕获组（session_id）
     std::string sid = req.matches[1];
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;
@@ -208,7 +208,7 @@ void Server::handle_get_depth(const httplib::Request& req, httplib::Response& re
 void Server::handle_submit_order(const httplib::Request& req, httplib::Response& res) {
     std::string sid = req.matches[1];
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;
@@ -245,7 +245,7 @@ void Server::handle_cancel_order(const httplib::Request& req, httplib::Response&
     std::string sid = req.matches[1];
     std::string oid = req.matches[2];   // 第二个捕获组 = order_id
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;
@@ -265,7 +265,7 @@ void Server::handle_cancel_order(const httplib::Request& req, httplib::Response&
 void Server::handle_get_fills(const httplib::Request& req, httplib::Response& res) {
     std::string sid = req.matches[1];
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;
@@ -294,7 +294,7 @@ void Server::handle_get_fills(const httplib::Request& req, httplib::Response& re
 void Server::handle_get_stats(const httplib::Request& req, httplib::Response& res) {
     std::string sid = req.matches[1];
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;
@@ -308,7 +308,7 @@ void Server::handle_get_stats(const httplib::Request& req, httplib::Response& re
 void Server::handle_seed_orders(const httplib::Request& req, httplib::Response& res) {
     std::string sid = req.matches[1];
 
-    Session* session = manager_.get_session(sid);
+    auto session = manager_.get_session(sid);
     if (!session) {
         error_response(res, "Session not found", 404);
         return;

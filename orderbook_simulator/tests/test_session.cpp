@@ -97,7 +97,8 @@ TEST(SessionManagerTest, CreateAndGet) {
     std::string sid = manager.create_session("AAPL");
     EXPECT_FALSE(sid.empty());
 
-    Session* session = manager.get_session(sid);
+    // get_session 现在返回 shared_ptr（所有权凭证），见 session_manager.h 的注释
+    auto session = manager.get_session(sid);
     EXPECT_NE(session, nullptr);
     EXPECT_EQ(session->symbol(), "AAPL");
 }
@@ -116,7 +117,7 @@ TEST(SessionManagerTest, MultipleSessions) {
 TEST(SessionManagerTest, GetNonexistent) {
     SessionManager manager;
 
-    Session* session = manager.get_session("nonexistent");
+    auto session = manager.get_session("nonexistent");
     EXPECT_EQ(session, nullptr);
 }
 

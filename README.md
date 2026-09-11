@@ -114,11 +114,11 @@ python3 benchmarks/parity_gate.py     # exit 0 = all seven metrics at 0.00e+00
 
 | | |
 |---|---|
-| Unit tests | 134 GoogleTest cases (92 backtest + 42 order book) |
+| Unit tests | 137 GoogleTest cases (92 backtest + 45 order book) |
 | Compiler warnings | `-Wall -Wextra -Werror` on both engines, zero warnings |
 | Floating point | `-ffp-contract=off` — the FP operation sequence is pinned by the source, not by the compiler's FMA decisions |
-| Sanitizers | Full suite green under ASan + UBSan, `-fno-sanitize-recover=all` |
-| CI | ubuntu×{gcc,clang} × {Release,Debug}, macos×clang, sanitizers, and the parity gate |
+| Sanitizers | Full suite green under ASan + UBSan (`-fno-sanitize-recover=all`) and under ThreadSanitizer |
+| CI | ubuntu×{gcc,clang} × {Release,Debug}, macos×clang, ASan+UBSan, TSan, and the parity gate |
 | Cross-engine parity | Seven economic metrics bit-identical to the Python reference, enforced per push |
 | Indicator values | Golden fixture pins every indicator on every bar as a **bit pattern**, not a decimal |
 | Matching logic | Randomized differential test, 200 seeds × 300 steps = 60,000 operations vs a reference model |

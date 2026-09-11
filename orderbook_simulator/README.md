@@ -5,7 +5,7 @@ A limit order book and matching engine simulator in C++17, with a built-in REST 
 
 *[中文版 / Chinese version](README.zh-CN.md)*
 
-**~3.2k lines of C++ · four order types · 42 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
+**~3.2k lines of C++ · four order types · 45 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
 
 ---
 
@@ -48,8 +48,8 @@ cmake --build build -j8
 | `matching_engine.h` `.cpp` | Matching core: price priority then time priority, with the distinct semantics of all four order types |
 | `market_impact.h` | Market impact model (square-root law): estimates slippage for large orders by participation rate |
 | `statistics.h` `.cpp` | Book statistics: spread, relative spread (bps), depth, imbalance, VWAP |
-| `session.h` `.cpp` | One independent experiment: its own book, matching engine and fill log. Can be seeded with a random-but-reproducible book |
-| `session_manager.h` `.cpp` | Session isolation, `unordered_map<string, unique_ptr<Session>>` |
+| `session.h` `.cpp` | One independent experiment: its own book, matching engine and fill log, guarded by its own mutex. Can be seeded with a random-but-reproducible book |
+| `session_manager.h` `.cpp` | Session isolation, `unordered_map<string, shared_ptr<Session>>` behind a `shared_mutex`. `get_session` returns a `shared_ptr` so a session cannot be destroyed while a request holds it — see [Concurrency](#concurrency) |
 | `server.h` `.cpp` | REST API routing |
 
 ---
@@ -158,6 +158,80 @@ Submit got faster too, despite now doing an extra index insertion — because ev
 ([`tests/test_differential.cpp`](tests/test_differential.cpp): 200 seeds × 300 steps =
 60,000 operations, fill-for-fill identical to the reference model). Guardrail first, then
 performance — not the other way around.
+
+---
+
+## Concurrency
+
+The REST server is **multi-threaded**: cpp-httplib defaults to a pool of
+`max(8, hardware_concurrency − 1)` threads, and every route handler runs on a pool thread.
+Until recently this project contained **no locks and no atomics at all** — `grep
+'mutex|atomic|lock_guard|shared_mutex'` returned nothing — so all shared mutable state was
+unsynchronized.
+
+Those were not benign "stale read" races; three of the four were memory-unsafe:
+
+| Race | Consequence |
+|---|---|
+| `SessionManager::sessions_` insert can **rehash** the `unordered_map` while another thread is inside `find` | table corruption |
+| `get_session` returned a **raw pointer** borrowed from a `unique_ptr` | the caller's pointer dangles if another thread removes the session — use-after-free |
+| Concurrent submit + cancel on one session: one thread `pop_front()`s in `PriceLevel::match` or `erase`s a level in `cleanup()`, while another iterates `bids_` in `cancel_order` | iterator invalidation, use-after-free |
+| `generate_id()` used a plain function-local `static` counter; `counter++` is read-modify-write | **duplicate order ids**, which breaks every id-based lookup and the cancel index |
+
+### What the fix is
+
+**One mutex per `Session`.** Not a single global lock: different sessions are already fully
+isolated (each owns its own book and matching engine), and a global lock would defeat the
+purpose `session_manager.h` states in its own header comment — running multiple simulations in
+parallel. Locking at the session granularity removes the races while keeping genuine
+cross-session parallelism.
+
+**A `shared_mutex` guarding the session table**, since lookups vastly outnumber creations and
+removals.
+
+**`get_session` now returns `std::shared_ptr<Session>`.** This part matters: adding a mutex
+alone would *not* have fixed the dangling-pointer race. A lock only protects the table lookup
+itself — once the caller walks out of the critical section holding a raw pointer, another
+thread's `remove_session` destroys the object underneath it. Returning a `shared_ptr` makes the
+return value an ownership receipt: the session stays alive until the caller is done, and
+`remove_session` merely unlinks it, with destruction deferred to the last reference.
+
+**`generate_id()`'s counter is now `std::atomic<int64_t>`.**
+
+### Verified with ThreadSanitizer, not by reading the code
+
+Three stress cases in [`tests/test_concurrency.cpp`](tests/test_concurrency.cpp) drive
+concurrent create/get/remove, concurrent submit/cancel/read on a single session, and
+multi-threaded id generation.
+
+Passing them in a normal build proves little — the defining property of a data race is that it
+usually *doesn't* crash. The actual verification is:
+
+```bash
+./build.sh tsan
+```
+
+ThreadSanitizer reports races when they **actually occur**, rather than waiting for one to
+happen to corrupt something. The stress cases exist to give TSan dense enough concurrent
+access to have something to find. TSan and ASan cannot be enabled together (both need to own
+memory layout), so it is a separate build mode with its own directory, and a separate CI job.
+
+**Measured, in both directions:**
+
+| Build | Data races reported by TSan |
+|---|---|
+| Locks removed (i.e. the pre-fix code) | **182** |
+| With the fix | **0** (all 45 cases pass) |
+
+The 182 reports landed on exactly the predicted sites — `generate_id()`,
+`PriceLevel::add_order` / `remove_order` / `match` / `is_empty` / `total_quantity`, and
+`BookOrder::fill` / `remaining`.
+
+That second row is only meaningful because of the first. A clean TSan run proves nothing on its
+own: TSan can only report races that the test actually exercises, so "no findings" is equally
+consistent with "no races" and "the test never made two threads touch the same thing." Removing
+the locks and confirming 182 findings is what establishes that these stress cases genuinely
+reach the shared state.
 
 ---
 
@@ -290,7 +364,7 @@ systematically overstate strategy returns.
 ## Testing
 
 ```bash
-./build/orderbook_tests                              # 42 cases
+./build/orderbook_tests                              # 45 cases
 ./build/orderbook_tests --gtest_filter='Differential*'   # randomized differential test
 OB_SOAK_SEEDS=2000 ./build/orderbook_tests --gtest_filter='Differential*'   # soak run
 ./build/orderbook_tests --gtest_also_run_disabled_tests --gtest_filter='PriceIntegrity*'

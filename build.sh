@@ -6,6 +6,7 @@
 #   ./build.sh            # Release 构建 + 跑测试
 #   ./build.sh Debug      # Debug 构建 + 跑测试
 #   ./build.sh asan       # Debug + ASan/UBSan 构建 + 跑测试
+#   ./build.sh tsan       # Debug + ThreadSanitizer 构建 + 跑测试（查数据竞争）
 #
 set -euo pipefail
 
@@ -14,6 +15,7 @@ JOBS="$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu || echo 4 )
 
 MODE="${1:-Release}"
 SANITIZE=OFF
+TSAN=OFF
 # asan 模式用独立的构建目录 build-asan/，不与 Release 的 build/ 混用。
 # 混用会踩两个坑：一是每次切换都要全量重编，二是很容易拿着上一次遗留的
 # 非 sanitizer 产物以为自己在跑 sanitizer。
@@ -22,6 +24,11 @@ if [ "${MODE}" = "asan" ] || [ "${MODE}" = "ASan" ] || [ "${MODE}" = "ASAN" ]; t
     BUILD_TYPE="Debug"
     SANITIZE=ON
     BUILD_DIR="build-asan"
+elif [ "${MODE}" = "tsan" ] || [ "${MODE}" = "TSan" ] || [ "${MODE}" = "TSAN" ]; then
+    # TSan 与 ASan 互斥，所以用独立的构建目录和独立的开关
+    BUILD_TYPE="Debug"
+    TSAN=ON
+    BUILD_DIR="build-tsan"
 else
     BUILD_TYPE="${MODE}"
 fi
@@ -30,11 +37,12 @@ build_one() {
     local name="$1"
     echo ""
     echo "════════════════════════════════════════════════════════"
-    echo "  构建 ${name}  (${BUILD_TYPE}, sanitizers=${SANITIZE}, -j${JOBS})"
+    echo "  构建 ${name}  (${BUILD_TYPE}, asan=${SANITIZE}, tsan=${TSAN}, -j${JOBS})"
     echo "════════════════════════════════════════════════════════"
     cmake -S "${ROOT}/${name}" -B "${ROOT}/${name}/${BUILD_DIR}" \
           -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-          -DENABLE_SANITIZERS="${SANITIZE}"
+          -DENABLE_SANITIZERS="${SANITIZE}" \
+          -DENABLE_TSAN="${TSAN}"
     cmake --build "${ROOT}/${name}/${BUILD_DIR}" -j"${JOBS}"
 }
 

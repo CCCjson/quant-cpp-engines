@@ -20,6 +20,7 @@
 
 #include <string>
 #include <vector>
+#include <mutex>      // std::mutex —— 每个 Session 一把锁，见下方 mu_ 的注释
 #include <optional>   // std::optional（本文件直接用到，不指望传递包含）
 #include <cstdint>    // std::uint32_t
 #include "orderbook/types.h"
@@ -103,6 +104,28 @@ public:
     );
 
 private:
+    /*
+     * ── 每个 Session 一把锁 ──
+     *
+     * REST 服务器（cpp-httplib）默认开 max(8, hardware_concurrency-1) 个工作线程，
+     * 每个 handler 都跑在池线程上。同一个 session_id 的两个并发请求会拿到**同一个**
+     * Session 对象，而下面这些成员全都是可变共享状态。
+     *
+     * 不加锁的后果不是「读到旧值」这种良性竞争，而是内存不安全：
+     * 一个线程在 PriceLevel::match 里 pop_front()、或在 cleanup() 里 bids_.erase()，
+     * 另一个线程正在 cancel_order 里迭代 bids_ —— 迭代器失效 + use-after-free。
+     * all_fills_ 的 push_back 扩容与 get_recent_fills 的区间读取同理。
+     *
+     * 为什么是「每 session 一把」而不是一把全局锁：
+     * 不同 session 之间本来就完全隔离（各有自己的簿与撮合引擎），
+     * 用全局锁会把「多个并行模拟实验」这个设计初衷废掉 ——
+     * session_manager.h 的头注释明确说了它是为此存在的。
+     * 粒度选在 session 上，既消除了竞争，又保留了跨 session 的真并行。
+     *
+     * mutable：get_depth / get_stats / find_order 等是 const 方法，但加锁需要改锁的状态。
+     */
+    mutable std::mutex mu_;
+
     std::string session_id_;
     std::string symbol_;
     LimitOrderBook book_;          // 该会话的订单簿
