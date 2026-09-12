@@ -40,6 +40,7 @@
 
 #include "orderbook/session_manager.h"
 #include "orderbook/types.h"
+#include "test_price_helpers.h"
 
 #include <atomic>
 #include <set>
@@ -130,7 +131,7 @@ TEST(ConcurrencyTest, ConcurrentSubmitCancelAndReadOnOneSession) {
     const std::string sid = mgr.create_session("TEST");
     auto session = mgr.get_session(sid);
     ASSERT_NE(session, nullptr);
-    session->seed_orders(2000, 100.0, 0.01, 2, 50, 100, 1000, 4242u);
+    session->seed_orders(2000, P(100.0), TS(0.01), 2, 50, 100, 1000, 4242u);
 
     const unsigned T = threads_to_use();
     const int per_thread = 300;
@@ -146,8 +147,8 @@ TEST(ConcurrencyTest, ConcurrentSubmitCancelAndReadOnOneSession) {
                         BookOrder o;
                         o.side = (t % 2) ? Side::BUY : Side::SELL;
                         o.order_type = OrderType::LIMIT;
-                        o.price = (o.side == Side::BUY) ? 50.0 - (i % 20) * 0.01
-                                                        : 150.0 + (i % 20) * 0.01;
+                        o.price = P((o.side == Side::BUY) ? 50.0 - (i % 20) * 0.01
+                                                           : 150.0 + (i % 20) * 0.01);
                         o.quantity = 100;
                         const auto r = session->submit_order(std::move(o));
                         mine.push_back(r.order_id);
@@ -168,7 +169,7 @@ TEST(ConcurrencyTest, ConcurrentSubmitCancelAndReadOnOneSession) {
                         BookOrder o;
                         o.side = (t % 2) ? Side::BUY : Side::SELL;
                         o.order_type = OrderType::IOC;
-                        o.price = (o.side == Side::BUY) ? 101.0 : 99.0;
+                        o.price = P((o.side == Side::BUY) ? 101.0 : 99.0);
                         o.quantity = 50;
                         (void)session->submit_order(std::move(o));
                         (void)session->get_depth(10);

@@ -3,6 +3,8 @@
  */
 
 #include "orderbook/matching_engine.h"
+
+#include <optional>
 #include <limits>   // std::numeric_limits — 获取类型的最大/最小值
 
 namespace orderbook {
@@ -53,8 +55,8 @@ MatchResult MatchingEngine::handle_market_order(LimitOrderBook& book, BookOrder&
     result.is_rejected = false;
     result.is_resting = false;   // 市价单不会挂单
 
-    // price_limit = 0 表示"不限价格"，能吃多少吃多少
-    result.fills = match_against_book(book, order, 0.0);
+    // 市价单不限价：传 std::nullopt（不是某个哨兵数值）
+    result.fills = match_against_book(book, order, std::nullopt);   // 市价单：无价格上限
 
     result.filled_quantity = order.filled_quantity;
     result.remaining_quantity = order.remaining();
@@ -164,7 +166,7 @@ MatchResult MatchingEngine::handle_fok_order(LimitOrderBook& book, BookOrder& or
 std::vector<Fill> MatchingEngine::match_against_book(
     LimitOrderBook& book,
     BookOrder& order,
-    double price_limit
+    std::optional<Price> price_limit
 ) {
     /*
      * 核心撮合循环：
@@ -194,8 +196,8 @@ std::vector<Fill> MatchingEngine::match_against_book(
             if (!best_level) break;   // 卖盘空了，没得吃
 
             // 检查价格是否可以交叉
-            // 对于市价单，price_limit = 0，直接跳过价格检查
-            if (price_limit > 0 && best_level->price() > price_limit) {
+            // 市价单的 price_limit 是 nullopt —— 无上限，不做越价检查
+            if (price_limit && best_level->price() > *price_limit) {
                 break;   // 最低卖价已经超过我的出价上限了，停止
             }
         } else {
@@ -203,7 +205,7 @@ std::vector<Fill> MatchingEngine::match_against_book(
             best_level = book.best_bid_level();
             if (!best_level) break;   // 买盘空了
 
-            if (price_limit > 0 && best_level->price() < price_limit) {
+            if (price_limit && best_level->price() < *price_limit) {
                 break;   // 最高买价已经低于我的要价下限了，停止
             }
         }
@@ -243,7 +245,7 @@ std::vector<Fill> MatchingEngine::match_against_book(
 int MatchingEngine::available_quantity(
     const LimitOrderBook& book,
     Side aggressor_side,
-    double price_limit
+    std::optional<Price> price_limit
 ) const {
     /*
      * 遍历对手盘，计算在价格限制范围内的总量。
@@ -260,13 +262,13 @@ int MatchingEngine::available_quantity(
     if (aggressor_side == Side::BUY) {
         // 买单检查卖盘
         for (const auto& level : depth.asks) {
-            if (price_limit > 0 && level.price > price_limit) break;
+            if (price_limit && level.price > *price_limit) break;
             total += level.quantity;
         }
     } else {
         // 卖单检查买盘
         for (const auto& level : depth.bids) {
-            if (price_limit > 0 && level.price < price_limit) break;
+            if (price_limit && level.price < *price_limit) break;
             total += level.quantity;
         }
     }

@@ -18,27 +18,28 @@
 
 #include <gtest/gtest.h>
 #include "orderbook/price_level.h"
+#include "test_price_helpers.h"
 
 using namespace orderbook;
 
 // ── 基本功能测试 ──
 
 TEST(PriceLevelTest, EmptyLevel) {
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
-    EXPECT_EQ(level.price(), 100.0);
+    EXPECT_EQ(level.price(), P(100.0));
     EXPECT_TRUE(level.is_empty());
     EXPECT_EQ(level.total_quantity(), 0);
     EXPECT_EQ(level.order_count(), 0);
 }
 
 TEST(PriceLevelTest, AddOrder) {
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder order;
     order.order_id = "o1";
     order.side = Side::BUY;
-    order.price = 100.0;
+    order.price = P(100.0);
     order.quantity = 500;
 
     level.add_order(order);
@@ -49,13 +50,13 @@ TEST(PriceLevelTest, AddOrder) {
 }
 
 TEST(PriceLevelTest, MultipleOrders) {
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     for (int i = 0; i < 3; i++) {
         BookOrder order;
         order.order_id = "o" + std::to_string(i);
         order.side = Side::BUY;
-        order.price = 100.0;
+        order.price = P(100.0);
         order.quantity = 100 * (i + 1);   // 100, 200, 300
         level.add_order(order);
     }
@@ -68,7 +69,7 @@ TEST(PriceLevelTest, MultipleOrders) {
 // ── 撤单测试 ──
 
 TEST(PriceLevelTest, RemoveOrder) {
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder order;
     order.order_id = "o1";
@@ -81,7 +82,7 @@ TEST(PriceLevelTest, RemoveOrder) {
 }
 
 TEST(PriceLevelTest, RemoveNonexistent) {
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder order;
     order.order_id = "o1";
@@ -98,12 +99,12 @@ TEST(PriceLevelTest, RemoveNonexistent) {
 
 TEST(PriceLevelTest, MatchPartial) {
     // 场景：价位上有 500 股，来单只要 200 股
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder order;
     order.order_id = "resting1";
     order.side = Side::SELL;
-    order.price = 100.0;
+    order.price = P(100.0);
     order.quantity = 500;
     level.add_order(order);
 
@@ -112,7 +113,7 @@ TEST(PriceLevelTest, MatchPartial) {
     EXPECT_EQ(matched, 200);                // 成交了 200 股
     EXPECT_EQ(fills.size(), 1);             // 1 笔成交
     EXPECT_EQ(fills[0].quantity, 200);
-    EXPECT_EQ(fills[0].price, 100.0);
+    EXPECT_EQ(fills[0].price, P(100.0));
     EXPECT_EQ(fills[0].buy_order_id, "aggressor1");
     EXPECT_EQ(fills[0].sell_order_id, "resting1");
     EXPECT_EQ(level.total_quantity(), 300); // 挂单还剩 300
@@ -120,7 +121,7 @@ TEST(PriceLevelTest, MatchPartial) {
 
 TEST(PriceLevelTest, MatchFull) {
     // 场景：价位上有 500 股，来单要 500 股 → 全部成交
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder order;
     order.order_id = "resting1";
@@ -137,7 +138,7 @@ TEST(PriceLevelTest, MatchFull) {
 TEST(PriceLevelTest, MatchFIFO) {
     // 场景：价位上有两个挂单 (300 + 200 = 500)，来单要 400 股
     // 应该先吃第一个（300 全吃），再吃第二个（吃 100）
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder o1;
     o1.order_id = "first";
@@ -164,7 +165,7 @@ TEST(PriceLevelTest, MatchFIFO) {
 
 TEST(PriceLevelTest, MatchMoreThanAvailable) {
     // 场景：来单要 1000 股，但价位上只有 300 股
-    PriceLevel level(100.0);
+    PriceLevel level(P(100.0));
 
     BookOrder o1;
     o1.order_id = "resting";

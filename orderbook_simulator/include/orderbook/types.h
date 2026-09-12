@@ -18,6 +18,7 @@
 #ifndef ORDERBOOK_TYPES_H     // "头文件保护"：防止同一个文件被 #include 两次
 #define ORDERBOOK_TYPES_H     // 如果已经定义过这个宏，就跳过整个文件
 
+#include "orderbook/price.h"
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -116,7 +117,15 @@ struct BookOrder {
     std::string order_id;       // 订单唯一标识（如 "a3f2b1c8"）
     Side side;                  // 买还是卖
     OrderType order_type;       // 订单类型
-    double price;               // 价格（市价单为 0）
+    /*
+     * 价格。定点类型，见 price.h ——
+     * 原来是 double，而订单簿用它做有序 map 的 key，导致同一名义价格可能
+     * 落成两个不同档位、进而破坏时间优先。
+     *
+     * 市价单不看这个字段（撮合时传入的价格上限是 std::nullopt，
+     * 而不是靠某个哨兵值来表示「无上限」——见 matching_engine.h）。
+     */
+    Price price;
     int quantity;               // 总数量（想买/卖多少股）
     int filled_quantity;        // 已成交数量（已经买到/卖出多少股）
     int64_t timestamp;          // 下单时间（纳秒时间戳）
@@ -129,7 +138,7 @@ struct BookOrder {
     BookOrder()
         : side(Side::BUY)
         , order_type(OrderType::LIMIT)
-        , price(0.0)
+        , price()
         , quantity(0)
         , filled_quantity(0)
         , timestamp(0)
@@ -169,7 +178,7 @@ struct BookOrder {
             {"order_id", order_id},
             {"side", side_to_string(side)},
             {"order_type", order_type_to_string(order_type)},
-            {"price", price},
+            {"price", price.to_double()},
             {"quantity", quantity},
             {"filled_quantity", filled_quantity},
             {"remaining", remaining()},
@@ -194,13 +203,13 @@ struct Fill {
     std::string fill_id;          // 成交唯一标识
     std::string buy_order_id;     // 买方订单 ID
     std::string sell_order_id;    // 卖方订单 ID
-    double price;                 // 成交价格
+    Price price;                  // 成交价格（定点，见 price.h）
     int quantity;                 // 成交数量
     Side aggressor_side;          // 主动方：是谁发起了这笔交易
     int64_t timestamp;            // 成交时间
 
     Fill()
-        : price(0.0)
+        : price()
         , quantity(0)
         , aggressor_side(Side::BUY)
         , timestamp(0)
@@ -211,7 +220,7 @@ struct Fill {
             {"fill_id", fill_id},
             {"buy_order_id", buy_order_id},
             {"sell_order_id", sell_order_id},
-            {"price", price},
+            {"price", price.to_double()},
             {"quantity", quantity},
             {"aggressor_side", side_to_string(aggressor_side)},
             {"timestamp", timestamp}

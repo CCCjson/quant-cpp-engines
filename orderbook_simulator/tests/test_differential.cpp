@@ -50,6 +50,7 @@
 #include "orderbook/session.h"
 #include "orderbook/limit_order_book.h"
 #include "orderbook/matching_engine.h"
+#include "test_price_helpers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -218,8 +219,9 @@ private:
 // ⚠️ 这里按 tick 归档，而真实簿按 double 归档。如果真实簿把同一个名义价格
 // 分裂成了两个 double 档位，归一化之后两份会合到同一个 tick 下 —— 数量总和
 // 仍然对得上，但**档位数**对不上。所以下面另有一项专门比档位数。
-int tick_of_price(double p) {
-    return static_cast<int>(std::llround((p - kBase) / kTick));
+int tick_of_price(Price p) {
+    // 真实簿现在也按整数定点归档了，所以这里直接在定点域里算 tick 序号
+    return static_cast<int>(std::llround((p.to_double() - kBase) / kTick));
 }
 
 struct RealSideState {
@@ -316,11 +318,9 @@ struct ReplayResult {
  * 一切问题 —— 每个种子都在同一处先失败，撮合逻辑本身反而测不到。
  *
  * 所以：
- *   check_level_count = false → 只比逐档总量、成交序列、不变量。
- *                               这一档必须通过，它守的是撮合逻辑。
- *   check_level_count = true  → 连档位数一起比。这一档目前会失败，
- *                               是那个浮点键缺陷的验收测试（见文件末尾的
- *                               DISABLED_ 用例）。
+ *   check_level_count = false → 只比逐档总量、成交序列、不变量。守的是撮合逻辑。
+ *   check_level_count = true  → 连档位数一起比。这一档曾是浮点键缺陷的验收测试；
+ *                               价格改成定点之后它已经通过（见文件末尾那个用例）。
  */
 struct ReplayOpts {
     bool check_level_count = true;
@@ -361,8 +361,9 @@ ReplayResult replay(const std::vector<Op>& ops, ReplayOpts opts = {}) {
             o.quantity = op.quantity;
             o.timestamp = static_cast<std::int64_t>(i) + 1;
             // MARKET 不看价格；其余三种用生成的价格
-            o.price = (op.type == OrderType::MARKET) ? 0.0
-                                                     : price_of(op.tick, op.via_round);
+            o.price = (op.type == OrderType::MARKET)
+                          ? Price()
+                          : P(price_of(op.tick, op.via_round));
 
             const MatchResult res = engine.submit_order(book, std::move(o));
 
@@ -533,7 +534,7 @@ int soak_seeds(int dflt) {
  * 主用例：撮合逻辑必须与参照模型逐笔一致。
  *
  * 比对内容：成交序列（价格/数量/主动方/顺序）、逐档总量、买卖不交叉。
- * 不比档位数 —— 那是下面那个 DISABLED_ 用例的事，理由见 ReplayOpts 的注释。
+ * 不比档位数、且价格算式统一 —— 那是下面那个用例的事，理由见 ReplayOpts 的注释。
  *
  * 规模：默认 200 个种子 × 300 步，单机秒级。长跑设 OB_SOAK_SEEDS。
  */
@@ -545,29 +546,19 @@ TEST(DifferentialTest, MatchingLogicMatchesReferenceModel) {
 }
 
 /*
- * ⛔ 已知缺陷的验收测试，当前**预期失败**，故 DISABLED_。
+ * ── 浮点价格键缺陷的验收测试（曾是 DISABLED_，现已通过）──
  *
- * 缺陷：订单簿是 std::map<double, PriceLevel>（limit_order_book.h:152-158），
- * 价格是浮点数且被当作有序 map 的 key。两个代数上相等、但浮点位模式不同的
- * 价格会成为两个不同的档位。
- *
- * 本测试就是这么发现它的：参照模型按整数 tick 归档、不可能分裂；真实簿分裂了。
+ * 这个用例把价格算式**混用**两种代数等价的写法，再连档位数一起比对。
+ * 当初它就是这么发现缺陷的：订单簿曾是 std::map<double, PriceLevel>，
+ * 两个代数上相等、位模式不同的价格会成为两个不同的档位。
  * 种子 12648430 第 106 步，BUY 盘真实 7 档而参照 6 档 —— 逐档总量全对，
- * 唯独档位数多一个。
+ * 唯独档位数多一个。最小复现被收缩到 3 步，固化在 test_price_integrity.cpp。
  *
- * 具体机理（已单独复现）：mid=100.0、tick=0.01 时，
- *   round((100.0 - 1*0.01)/0.01)*0.01  →  99.990000000000009
- *   直接解析字面量 99.99                →  99.989999999999995
- * 两个不同的 double。于是 bid_quantity_at(99.99) 会漏报另一半的量。
- *
- * 为什么 DISABLED_ 而不是让它红着：CI 长期红等于没有 CI，红色会被习惯性忽略。
- * DISABLED_ 是 GoogleTest 为「已知缺陷、已有测试守着」准备的惯例做法 ——
- * 用 --gtest_also_run_disabled_tests 就能看到它，且缺陷修好时它就是验收标准。
- *
- * 修复方案（计划中的 Layer 2）：价格改成 int64 定点的强类型，
- * double↔定点的转换只发生在 JSON 边界。届时把本用例的 DISABLED_ 去掉。
+ * 价格已改成 int64 定点强类型（见 orderbook/price.h），map 的 key 变成整数，
+ * 转换只发生在 JSON 边界。这个用例因此从「预期失败、挂 DISABLED_」变成
+ * 常规回归测试：谁把价格改回浮点，它就变红。
  */
-TEST(DifferentialTest, DISABLED_PriceLevelsAreNotSplitByFloatKeys) {
+TEST(DifferentialTest, PriceLevelsAreNotSplitByFloatKeys) {
     const std::string failure = run_seeds(ReplayOpts{/*check_level_count=*/true},
                                           soak_seeds(200), 300,
                                           /*mixed_price_algebra=*/true);

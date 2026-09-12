@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include "orderbook/matching_engine.h"
+#include "test_price_helpers.h"
 
 using namespace orderbook;
 
@@ -20,7 +21,7 @@ static LimitOrderBook make_standard_book() {
         o.order_id = id;
         o.side = side;
         o.order_type = OrderType::LIMIT;
-        o.price = price;
+        o.price = P(price);
         o.quantity = qty;
         o.timestamp = now_ns();
         book.add_order(std::move(o));
@@ -58,11 +59,11 @@ TEST(MatchingTest, MarketBuy_PartialFill) {
     EXPECT_FALSE(result.is_rejected);
     EXPECT_EQ(result.filled_quantity, 100);
     EXPECT_EQ(result.fills.size(), 1);
-    EXPECT_EQ(result.fills[0].price, 101.00);
+    EXPECT_EQ(result.fills[0].price, P(101.00));
     EXPECT_EQ(result.fills[0].quantity, 100);
 
     // 101.00 还剩 50 股
-    EXPECT_EQ(book.ask_quantity_at(101.00), 50);
+    EXPECT_EQ(book.ask_quantity_at(P(101.00)), 50);
 }
 
 TEST(MatchingTest, MarketBuy_CrossMultipleLevels) {
@@ -79,9 +80,9 @@ TEST(MatchingTest, MarketBuy_CrossMultipleLevels) {
 
     EXPECT_EQ(result.filled_quantity, 200);
     EXPECT_EQ(result.fills.size(), 2);
-    EXPECT_EQ(result.fills[0].price, 101.00);
+    EXPECT_EQ(result.fills[0].price, P(101.00));
     EXPECT_EQ(result.fills[0].quantity, 150);
-    EXPECT_EQ(result.fills[1].price, 101.50);
+    EXPECT_EQ(result.fills[1].price, P(101.50));
     EXPECT_EQ(result.fills[1].quantity, 50);
 }
 
@@ -98,7 +99,7 @@ TEST(MatchingTest, MarketSell) {
     auto result = engine.submit_order(book, order);
 
     EXPECT_EQ(result.filled_quantity, 80);
-    EXPECT_EQ(result.fills[0].price, 100.50);   // 从最高买价开始吃
+    EXPECT_EQ(result.fills[0].price, P(100.50));   // 从最高买价开始吃
 }
 
 
@@ -114,7 +115,7 @@ TEST(MatchingTest, LimitBuy_NoMatch) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::LIMIT;
-    order.price = 100.50;
+    order.price = P(100.50);
     order.quantity = 200;
 
     auto result = engine.submit_order(book, order);
@@ -124,7 +125,7 @@ TEST(MatchingTest, LimitBuy_NoMatch) {
     EXPECT_EQ(result.fills.size(), 0);
 
     // 100.50 上原来有 100 股，加上新挂的 200 股 = 300
-    EXPECT_EQ(book.bid_quantity_at(100.50), 300);
+    EXPECT_EQ(book.bid_quantity_at(P(100.50)), 300);
 }
 
 TEST(MatchingTest, LimitBuy_PartialMatchThenRest) {
@@ -137,7 +138,7 @@ TEST(MatchingTest, LimitBuy_PartialMatchThenRest) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::LIMIT;
-    order.price = 101.00;
+    order.price = P(101.00);
     order.quantity = 300;
 
     auto result = engine.submit_order(book, order);
@@ -147,8 +148,8 @@ TEST(MatchingTest, LimitBuy_PartialMatchThenRest) {
     EXPECT_TRUE(result.is_resting);
 
     // 新的 best_bid 应该是 101.00（刚挂的 150 股）
-    EXPECT_EQ(book.best_bid().value(), 101.00);
-    EXPECT_EQ(book.bid_quantity_at(101.00), 150);
+    EXPECT_EQ(book.best_bid().value(), P(101.00));
+    EXPECT_EQ(book.bid_quantity_at(P(101.00)), 150);
 }
 
 TEST(MatchingTest, LimitBuy_FullMatch) {
@@ -159,7 +160,7 @@ TEST(MatchingTest, LimitBuy_FullMatch) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::LIMIT;
-    order.price = 102.00;
+    order.price = P(102.00);
     order.quantity = 150;
 
     auto result = engine.submit_order(book, order);
@@ -183,7 +184,7 @@ TEST(MatchingTest, IOC_PartialFillThenCancel) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::IOC;
-    order.price = 101.00;
+    order.price = P(101.00);
     order.quantity = 300;
 
     auto result = engine.submit_order(book, order);
@@ -202,7 +203,7 @@ TEST(MatchingTest, IOC_NoMatch) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::IOC;
-    order.price = 100.00;
+    order.price = P(100.00);
     order.quantity = 100;
 
     auto result = engine.submit_order(book, order);
@@ -225,7 +226,7 @@ TEST(MatchingTest, FOK_Reject) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::FOK;
-    order.price = 101.00;
+    order.price = P(101.00);
     order.quantity = 200;
 
     auto result = engine.submit_order(book, order);
@@ -235,7 +236,7 @@ TEST(MatchingTest, FOK_Reject) {
     EXPECT_EQ(result.fills.size(), 0);
 
     // 订单簿不应该有任何变化
-    EXPECT_EQ(book.ask_quantity_at(101.00), 150);
+    EXPECT_EQ(book.ask_quantity_at(P(101.00)), 150);
 }
 
 TEST(MatchingTest, FOK_FullFill) {
@@ -246,7 +247,7 @@ TEST(MatchingTest, FOK_FullFill) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::FOK;
-    order.price = 101.00;
+    order.price = P(101.00);
     order.quantity = 150;
 
     auto result = engine.submit_order(book, order);
@@ -264,7 +265,7 @@ TEST(MatchingTest, FOK_MultiLevel) {
     BookOrder order;
     order.side = Side::BUY;
     order.order_type = OrderType::FOK;
-    order.price = 101.50;
+    order.price = P(101.50);
     order.quantity = 300;
 
     auto result = engine.submit_order(book, order);

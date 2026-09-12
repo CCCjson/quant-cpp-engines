@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include "orderbook/session.h"
 #include "orderbook/session_manager.h"
+#include "test_price_helpers.h"
 
 using namespace orderbook;
 
@@ -20,7 +21,7 @@ TEST(SessionTest, CreateAndSeed) {
     EXPECT_EQ(session.symbol(), "AAPL");
 
     // 播种 100 个订单
-    int added = session.seed_orders(100, 100.0);
+    int added = session.seed_orders(100, P(100.0));
     EXPECT_EQ(added, 100);
 
     // 盘口应该有数据了
@@ -31,7 +32,7 @@ TEST(SessionTest, CreateAndSeed) {
 
 TEST(SessionTest, SubmitMarketOrder) {
     Session session("s1", "TEST");
-    session.seed_orders(200, 100.0, 0.01, 2, 20, 100, 500);
+    session.seed_orders(200, P(100.0), TS(0.01), 2, 20, 100, 500);
 
     // 提交市价买单
     BookOrder order;
@@ -47,14 +48,14 @@ TEST(SessionTest, SubmitMarketOrder) {
 
 TEST(SessionTest, SubmitLimitAndCancel) {
     Session session("s1", "TEST");
-    session.seed_orders(200, 100.0, 0.01, 2, 20, 100, 500);
+    session.seed_orders(200, P(100.0), TS(0.01), 2, 20, 100, 500);
 
     // 提交一个远离当前价的限价单（不会成交）
     BookOrder order;
     order.order_id = "my_order";
     order.side = Side::BUY;
     order.order_type = OrderType::LIMIT;
-    order.price = 90.0;   // 远低于当前价，不会成交
+    order.price = P(90.0);   // 远低于当前价，不会成交
     order.quantity = 100;
 
     auto result = session.submit_order(order);
@@ -68,18 +69,18 @@ TEST(SessionTest, SubmitLimitAndCancel) {
 
 TEST(SessionTest, GetStats) {
     Session session("s1", "TEST");
-    session.seed_orders(200, 100.0);
+    session.seed_orders(200, P(100.0));
 
     auto stats = session.get_stats();
 
     EXPECT_GT(stats.bid_depth, 0);
     EXPECT_GT(stats.ask_depth, 0);
-    EXPECT_GT(stats.spread, 0);
+    EXPECT_GT(stats.spread, P(0));
 }
 
 TEST(SessionTest, EstimateImpact) {
     Session session("s1", "TEST");
-    session.seed_orders(200, 100.0);
+    session.seed_orders(200, P(100.0));
 
     // 估算冲击：交易 1000 股，波动率 2%，日均量 100 万
     double impact = session.estimate_impact(1000, 0.02, 1000000);

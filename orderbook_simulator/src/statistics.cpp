@@ -23,7 +23,7 @@ BookStats Statistics::calculate(
     // 基点 (basis point, bps) = 万分之一 = 0.01%
     // 比如价差 0.50 / 中间价 100.25 = 0.00499 = 49.9 bps
     if (stats.mid_price > 0) {
-        stats.spread_bps = (stats.spread / stats.mid_price) * 10000.0;
+        stats.spread_bps = (stats.spread.to_double() / stats.mid_price) * 10000.0;
     } else {
         stats.spread_bps = 0.0;
     }
@@ -60,7 +60,8 @@ BookStats Statistics::calculate(
     int volume_sum = 0;              // 分母：数量累加
 
     for (const auto& fill : fills) {
-        price_volume_sum += fill.price * fill.quantity;
+        // VWAP 是加权平均，本来就落在网格外 —— 在这里离开定点域
+        price_volume_sum += fill.price.to_double() * fill.quantity;
         volume_sum += fill.quantity;
     }
 

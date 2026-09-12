@@ -42,14 +42,18 @@ Seven hypotheses, controlled experiments, and the known limits of each claim:
 
 ### Three other things a reviewer might care about
 
-**A randomized differential test found a real fairness bug in the matching engine.**
-Random order flow is replayed against both the real book and a deliberately slow, obviously
-correct reference model, comparing fills *and* full book state at every step. It found this
-(seed 12648430, auto-shrunk from 300 steps to 3): two orders at the same nominal price
-`100.07`, computed via two algebraically equivalent formulas, land on **two different
-`std::map<double, ...>` keys** — so the later order fills first and the earlier one is
-skipped. That violates time priority, which this project's own docs promise. Details and
-the acceptance tests: [`orderbook_simulator/README.md`](orderbook_simulator/README.md).
+**A randomized differential test found — and then verified the fix for — a real fairness bug
+in the matching engine.** Random order flow is replayed against both the real book and a
+deliberately slow, obviously correct reference model, comparing fills *and* full book state at
+every step. It found this (seed 12648430, auto-shrunk from 300 steps to 3): two orders at the
+same nominal price `100.07`, computed via two algebraically equivalent formulas, landed on
+**two different `std::map<double, ...>` keys** — so the later order filled first and the earlier
+one was skipped, violating the time priority this project's own docs promise.
+
+The fix was a strong fixed-point `Price` type (`int64` at 1e-4 scale) with double↔fixed
+conversion confined to the JSON boundary; the acceptance tests that were written as failing
+`DISABLED_` cases are now enabled and green. Details:
+[`orderbook_simulator/README.md`](orderbook_simulator/README.md).
 
 **A bit-exact parity gate runs in CI.** Before any performance number is quoted, the C++ and
 Python engines must agree on seven economic metrics to `0.00e+00` — not "within tolerance,"
@@ -67,7 +71,7 @@ One published speedup was revised down from 502× to 312× for exactly this reas
 | Directory | Contents |
 |---|---|
 | [`backtest_engine/`](backtest_engine/) | Event-driven backtest engine. 10 strategies, portfolio backtesting on a shared cash pool, risk/commission/slippage modeling |
-| [`orderbook_simulator/`](orderbook_simulator/) | Limit order book + matching engine. Four order types, market impact estimation, isolated sessions |
+| [`orderbook_simulator/`](orderbook_simulator/) | Limit order book + matching engine. Four order types, fixed-point prices, O(1) cancel, market impact estimation, thread-safe isolated sessions |
 | [`benchmarks/`](benchmarks/) | **The performance investigation**: C++ vs a real Python reference engine, seven hypotheses tested one by one, with controls |
 | [`examples/`](examples/) | Pure-stdlib Python demo client — exercises both engines in one command |
 | [`docs/`](docs/) | Original design docs (superseded by the per-project READMEs) |
@@ -114,7 +118,7 @@ python3 benchmarks/parity_gate.py     # exit 0 = all seven metrics at 0.00e+00
 
 | | |
 |---|---|
-| Unit tests | 137 GoogleTest cases (92 backtest + 45 order book) |
+| Unit tests | 148 GoogleTest cases (92 backtest + 56 order book), zero disabled |
 | Compiler warnings | `-Wall -Wextra -Werror` on both engines, zero warnings |
 | Floating point | `-ffp-contract=off` — the FP operation sequence is pinned by the source, not by the compiler's FMA decisions |
 | Sanitizers | Full suite green under ASan + UBSan (`-fno-sanitize-recover=all`) and under ThreadSanitizer |
@@ -123,15 +127,10 @@ python3 benchmarks/parity_gate.py     # exit 0 = all seven metrics at 0.00e+00
 | Indicator values | Golden fixture pins every indicator on every bar as a **bit pattern**, not a decimal |
 | Matching logic | Randomized differential test, 200 seeds × 300 steps = 60,000 operations vs a reference model |
 
-Three tests are deliberately `DISABLED_`: they are the acceptance criteria for the
-floating-point price defect described above, and will be enabled by the fix.
-A permanently red CI is the same as no CI, so known defects get a disabled test plus
-documentation rather than a red badge.
-
-```bash
-./orderbook_simulator/build/orderbook_tests --gtest_also_run_disabled_tests \
-    --gtest_filter='PriceIntegrity*'
-```
+There are no disabled tests. While the floating-point price defect was open, its acceptance
+criteria lived as `DISABLED_` cases — a permanently red CI is the same as no CI, so a known
+defect gets a disabled test plus documentation rather than a red badge. Those three cases were
+enabled by the fix.
 
 ---
 

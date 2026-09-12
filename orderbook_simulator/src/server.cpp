@@ -165,7 +165,9 @@ void Server::handle_create_session(const httplib::Request& req, httplib::Respons
 
     // 播种初始订单
     if (session && seed_count > 0) {
-        session->seed_orders(seed_count, mid_price, tick_size, spread_ticks);
+        // JSON 边界：double → 定点
+        session->seed_orders(seed_count, Price::from_double(mid_price),
+                             TickSize::from_double(tick_size), spread_ticks);
     }
 
     // 返回结果
@@ -228,10 +230,46 @@ void Server::handle_submit_order(const httplib::Request& req, httplib::Response&
     order.order_id = generate_id();
     order.side = string_to_side(body.value("side", "BUY"));
     order.order_type = string_to_order_type(body.value("order_type", "LIMIT"));
-    order.price = body.value("price", 0.0);
     order.quantity = body.value("quantity", 100);
     order.timestamp = now_ns();
     order.client_tag = body.value("client_tag", "user");   // 默认用户订单，做市商传 "mm"
+
+    /*
+     * ── 入参校验：这两条原来都没有，各自对应一个真实缺陷 ──
+     *
+     * 1. 价格原来是 `body.value("price", 0.0)` —— **缺失即默认 0**。
+     *    配合撮合层用 `price_limit > 0` 表示「不限价」的哨兵，
+     *        POST /orders {"order_type":"LIMIT","side":"BUY","quantity":100}
+     *    会产生一个跳过越价检查、像市价单一样扫光整个卖盘的「限价单」，
+     *    再把余量挂在价格 0 上。撮合层的哨兵已经换成 std::optional，
+     *    但**不该靠下游兜底**：缺价格的限价单本身就是无效输入，该在这里挡掉。
+     *
+     * 2. 数量原来完全不校验。`quantity <= 0` 会走进语义未定义的分支 ——
+     *    BookOrder::is_filled() 是 `filled >= quantity`，负数量时零成交即为真。
+     *
+     * 按本项目一贯的取向：输入有问题就报 400，不糊弄过去返回一个看似正常的 200。
+     */
+    if (order.quantity <= 0) {
+        error_response(res, "quantity must be a positive integer");
+        return;
+    }
+    const bool needs_price = (order.order_type != OrderType::MARKET);
+    if (needs_price) {
+        if (!body.contains("price") || !body["price"].is_number()) {
+            error_response(res,
+                "a " + order_type_to_string(order.order_type) +
+                " order requires a numeric 'price' (only MARKET orders may omit it)");
+            return;
+        }
+        const double px = body["price"].get<double>();
+        if (!(px > 0.0)) {
+            error_response(res, "price must be greater than 0");
+            return;
+        }
+        // JSON 边界：double → 定点
+        order.price = Price::from_double(px);
+    }
+    // 市价单不读 price 字段：撮合时传入的上限是 std::nullopt
 
     // 提交撮合
     auto result = session->submit_order(std::move(order));
@@ -327,7 +365,8 @@ void Server::handle_seed_orders(const httplib::Request& req, httplib::Response& 
     double tick_size = body.value("tick_size", 0.01);
     int spread_ticks = body.value("spread_ticks", 2);
 
-    int added = session->seed_orders(count, mid_price, tick_size, spread_ticks);
+    int added = session->seed_orders(count, Price::from_double(mid_price),
+                                     TickSize::from_double(tick_size), spread_ticks);
 
     json result = {
         {"added_count", added},

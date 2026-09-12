@@ -16,7 +16,7 @@ namespace orderbook {
 // 构造函数
 // ============================================================
 
-PriceLevel::PriceLevel(double price)
+PriceLevel::PriceLevel(Price price)
     : price_(price)    // 初始化列表：直接初始化成员变量
                        // 比在函数体内赋值更高效（跳过了默认构造+赋值的两步）
 {
@@ -28,7 +28,7 @@ PriceLevel::PriceLevel(double price)
 // 查询方法
 // ============================================================
 
-double PriceLevel::price() const {
+Price PriceLevel::price() const {
     return price_;
 }
 

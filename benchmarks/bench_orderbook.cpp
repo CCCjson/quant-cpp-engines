@@ -31,6 +31,7 @@
 
 #include "orderbook/limit_order_book.h"
 #include "orderbook/session.h"
+#include "orderbook/price.h"
 #include "orderbook/types.h"
 
 using json = nlohmann::json;
@@ -163,7 +164,7 @@ json bench_submit(int n_orders, double overhead_ns, double granularity_ns) {
      */
     {
         Session warm("warmup", "TEST");
-        warm.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 7u);
+        warm.seed_orders(5000, Price::from_double(100.0), TickSize::from_double(0.01), 2, 200, 100, 1000, 7u);
         Lcg wr(1234567);
         const int wn = std::max(2000, n_orders / 20);
         for (int i = 0; i < wn; ++i) {
@@ -173,14 +174,14 @@ json bench_submit(int n_orders, double overhead_ns, double granularity_ns) {
             o.quantity = wr.range(100, 1000);
             o.order_type = OrderType::LIMIT;
             double off = wr.range(1, 150) * 0.01;
-            o.price = (o.side == Side::BUY) ? 100.0 - off : 100.0 + off;
+            o.price = Price::from_double((o.side == Side::BUY) ? 100.0 - off : 100.0 + off);
             o.timestamp = static_cast<int64_t>(i);
             warm.submit_order(std::move(o));
         }
     }
 
     Session session("bench", "TEST");
-    session.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 20240824u);
+    session.seed_orders(5000, Price::from_double(100.0), TickSize::from_double(0.01), 2, 200, 100, 1000, 20240824u);
 
     Lcg rng(20240824);
     std::vector<double> lat;
@@ -200,14 +201,14 @@ json bench_submit(int n_orders, double overhead_ns, double granularity_ns) {
         if (roll < 70) {                       // 被动挂单
             o.order_type = OrderType::LIMIT;
             double off = rng.range(1, 150) * 0.01;
-            o.price = (o.side == Side::BUY) ? 100.0 - off : 100.0 + off;
+            o.price = Price::from_double((o.side == Side::BUY) ? 100.0 - off : 100.0 + off);
         } else if (roll < 90) {                // 主动穿价
             o.order_type = OrderType::LIMIT;
             double off = rng.range(0, 30) * 0.01;
-            o.price = (o.side == Side::BUY) ? 100.0 + off : 100.0 - off;
+            o.price = Price::from_double((o.side == Side::BUY) ? 100.0 + off : 100.0 - off);
         } else {                               // 市价
             o.order_type = OrderType::MARKET;
-            o.price = 0.0;
+            o.price = Price::from_double(0.0);
         }
 
         auto a = Clock::now();
@@ -238,7 +239,7 @@ json bench_submit(int n_orders, double overhead_ns, double granularity_ns) {
 json bench_depth(int book_size, double overhead_ns, double granularity_ns,
                  int queries = 20000) {
     Session session("depth", "TEST");
-    session.seed_orders(book_size, 100.0, 0.01, 2, 2000, 100, 1000, 31337u);
+    session.seed_orders(book_size, Price::from_double(100.0), TickSize::from_double(0.01), 2, 2000, 100, 1000, 31337u);
 
     // 预热：先跑一批不计时的查询，把 icache / 分支预测器带热
     for (int i = 0; i < 2000; ++i) {
@@ -290,7 +291,7 @@ json bench_cancel(int n, double overhead_ns, double granularity_ns) {
             o.order_id = "cw" + std::to_string(i);
             o.side = Side::BUY;
             o.order_type = OrderType::LIMIT;
-            o.price = 50.0 - (i % 1000) * 0.01;
+            o.price = Price::from_double(50.0 - (i % 1000) * 0.01);
             o.quantity = 100;
             o.timestamp = static_cast<int64_t>(i);
             wids.push_back(o.order_id);
@@ -300,7 +301,7 @@ json bench_cancel(int n, double overhead_ns, double granularity_ns) {
     }
 
     Session session("cancel", "TEST");
-    session.seed_orders(5000, 100.0, 0.01, 2, 200, 100, 1000, 987654u);
+    session.seed_orders(5000, Price::from_double(100.0), TickSize::from_double(0.01), 2, 200, 100, 1000, 987654u);
 
     std::vector<std::string> ids;
     ids.reserve(n);
@@ -309,7 +310,7 @@ json bench_cancel(int n, double overhead_ns, double granularity_ns) {
         o.order_id = "c" + std::to_string(i);
         o.side = Side::BUY;
         o.order_type = OrderType::LIMIT;
-        o.price = 50.0 - (i % 1000) * 0.01;   // 远低于盘口，绝不会成交
+        o.price = Price::from_double(50.0 - (i % 1000) * 0.01);   // 远低于盘口，绝不会成交
         o.quantity = 100;
         o.timestamp = static_cast<int64_t>(i);
         o.client_tag = "bench";

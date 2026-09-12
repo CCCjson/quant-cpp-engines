@@ -40,12 +40,12 @@ public:
     // explicit 关键字：防止编译器做隐式类型转换
     // 没有 explicit 的话，PriceLevel level = 100.0; 这种写法会编译通过
     // 加了 explicit 后，必须写 PriceLevel level(100.0); 更安全
-    explicit PriceLevel(double price);
+    explicit PriceLevel(Price price);
 
     // ── 查询方法（都是 const，不修改对象）──
 
     /// 这个价位是多少钱
-    double price() const;
+    Price price() const;
 
     /// 该价位上所有活跃订单的总量
     ///
@@ -101,7 +101,7 @@ public:
     );
 
 private:
-    double price_;                     // 这个价位的价格
+    Price price_;                      // 这个价位的价格（定点，见 price.h）
     std::deque<BookOrder> orders_;     // 订单队列（FIFO）
 
     /*

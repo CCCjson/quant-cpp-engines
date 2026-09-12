@@ -100,8 +100,8 @@ bool Session::cancel_order(const std::string& order_id) {
 
 int Session::seed_orders(
     int count,
-    double mid_price,
-    double tick_size,
+    Price mid_price,
+    TickSize tick_size,
     int spread_ticks,
     int depth_ticks,
     int min_qty,
@@ -136,10 +136,21 @@ int Session::seed_orders(
     std::uniform_int_distribution<int> side_dist(0, 1);   // 0=买，1=卖
 
     int half_spread = spread_ticks / 2;
-    // 买盘最高价 = mid_price - half_spread × tick_size
-    // 卖盘最低价 = mid_price + half_spread × tick_size
-    double bid_top = mid_price - half_spread * tick_size;
-    double ask_bottom = mid_price + (half_spread + 1) * tick_size;
+    /*
+     * 买盘最高价 = mid - half_spread 个 tick；卖盘最低价 = mid + (half_spread+1) 个 tick。
+     *
+     * ⚠️ 这里原来是 double 运算，而且下面每个价格还要再过一道
+     *     order.price = std::round(order.price / tick_size) * tick_size;
+     * 那道「量化」正是浮点键缺陷的源头：round(99.99/0.01)*0.01 得到
+     * 99.990000000000009，而从 JSON 解析字面量 99.99 得到 99.989999999999995，
+     * 两者在 std::map<double,...> 里是两个不同的档位。
+     *
+     * 现在价格是定点整数，`mid - tick*n` 本身就精确落在网格上 ——
+     * **那道量化整个消失了**，没有东西需要再被四舍五入。
+     */
+    const Price tick = Price::from_raw(tick_size.raw);
+    Price bid_top = mid_price - tick * half_spread;
+    Price ask_bottom = mid_price + tick * (half_spread + 1);
 
     int added = 0;
 
@@ -157,16 +168,13 @@ int Session::seed_orders(
             // 在 [bid_top - depth_ticks * tick_size, bid_top] 范围内随机一个价格
             std::uniform_int_distribution<int> tick_dist(0, depth_ticks);
             int ticks_below = tick_dist(rng);
-            order.price = bid_top - ticks_below * tick_size;
-            // 四舍五入到 tick_size 精度
-            order.price = std::round(order.price / tick_size) * tick_size;
+            order.price = bid_top - tick * ticks_below;
         } else {
             // 卖单
             order.side = Side::SELL;
             std::uniform_int_distribution<int> tick_dist(0, depth_ticks);
             int ticks_above = tick_dist(rng);
-            order.price = ask_bottom + ticks_above * tick_size;
-            order.price = std::round(order.price / tick_size) * tick_size;
+            order.price = ask_bottom + tick * ticks_above;
         }
 
         // 随机数量

@@ -5,7 +5,7 @@ A limit order book and matching engine simulator in C++17, with a built-in REST 
 
 *[中文版 / Chinese version](README.zh-CN.md)*
 
-**~3.2k lines of C++ · four order types · 45 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
+**~3.4k lines of C++ · four order types · 56 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
 
 ---
 
@@ -44,7 +44,8 @@ cmake --build build -j8
 |---|---|
 | `include/orderbook/types.h` | `Side` / `OrderType` / `BookOrder` / `Fill`, nanosecond timestamps and ID generation |
 | `price_level.h` `.cpp` | FIFO order queue for one price level — the carrier of time priority. Level aggregates are maintained incrementally, so `is_empty()` / `order_count()` / `total_quantity()` are O(1) |
-| `limit_order_book.h` `.cpp` | Two-sided price tree: `std::map<double, PriceLevel, std::greater<>>` for bids (descending), `std::map` for asks (ascending). Plus an `order_id → (side, price)` hash index, making cancels O(1). `best_bid`/`best_ask` are O(1) |
+| `price.h` | **Fixed-point price type** (`int64` at 1e-4 scale). Prices are integers everywhere inside the engine; double↔fixed conversion happens only at the JSON boundary |
+| `limit_order_book.h` `.cpp` | Two-sided price tree: `std::map<Price, PriceLevel, std::greater<>>` for bids (descending), `std::map` for asks (ascending). Plus an `order_id → (side, price)` hash index, making cancels O(1). `best_bid`/`best_ask` are O(1) |
 | `matching_engine.h` `.cpp` | Matching core: price priority then time priority, with the distinct semantics of all four order types |
 | `market_impact.h` | Market impact model (square-root law): estimates slippage for large orders by participation rate |
 | `statistics.h` `.cpp` | Book statistics: spread, relative spread (bps), depth, imbalance, VWAP |
@@ -54,46 +55,80 @@ cmake --build build -j8
 
 ---
 
-## Known issues
+## Fixed: floating-point prices as ordered map keys
 
-All measured, and written down here rather than hidden.
+This was the most serious defect in the project, and it is now fixed. Kept on record because
+how it was found matters more than the fix.
 
-### Floating-point prices as ordered map keys — this breaks time priority
+### What was wrong
 
-The book is a `std::map<double, PriceLevel>`. Two algebraically equal formulas give
+The book used to be a `std::map<double, PriceLevel>`. Two algebraically equal formulas give
 different doubles:
 
 ```
 100.00 + 7*0.01                      = 100.06999999999999
-round((100.00 + 7*0.01)/0.01)*0.01   = 100.07000000000001   ← the form Session::seed_orders uses
+round((100.00 + 7*0.01)/0.01)*0.01   = 100.07000000000001   ← what Session::seed_orders used
 ```
 
-So "the 100.07 level" becomes **two distinct keys**. Two consequences:
+So "the 100.07 level" became **two distinct keys**. Two consequences, the second far worse:
 
-- `bid_quantity_at(100.07)` reports only one of the two levels' quantity;
-- **time priority is broken**: two orders at the same nominal price sit on different levels,
-  and matching picks the "best" level by double comparison — so **a later order can fill
-  before an earlier one**. Measured: `FIRST` (97 shares, ts=1) is skipped entirely while
-  `SECOND` (417 shares, ts=2) absorbs all 153 shares.
+- `bid_quantity_at(100.07)` reported only one of the two levels' quantity;
+- **time priority was broken**: two orders at the same nominal price sat on different levels,
+  and matching picked the "best" level by double comparison — so **a later order filled before
+  an earlier one**. Measured: `FIRST` (97 shares, ts=1) was skipped entirely while `SECOND`
+  (417 shares, ts=2) absorbed all 153 shares. That violates the price-priority-then-time-priority
+  guarantee this README makes below.
 
-This is not a rounding blemish. The "Order types" section below promises *price priority, then
-time priority (FIFO within a level)*, and that promise is violated.
+### How it was found
 
-**This defect was found by the randomized differential test**, not by reading the code
-([`tests/test_differential.cpp`](tests/test_differential.cpp), seed 12648430, auto-shrunk
-from 300 steps to 3). The reference model keys prices by integer tick, so it structurally
-cannot split a level; the real book did.
+**By the randomized differential test, not by reading the code**
+([`tests/test_differential.cpp`](tests/test_differential.cpp), seed 12648430, auto-shrunk from
+300 steps to 3). The reference model keys prices by integer tick, so it structurally cannot
+split a level; the real book did.
 
-Acceptance tests live in [`tests/test_price_integrity.cpp`](tests/test_price_integrity.cpp),
-currently marked `DISABLED_` — a permanently red CI is the same as no CI, so a known defect
-gets a disabled test plus documentation instead of a red badge:
+### The fix
 
-```bash
-./build/orderbook_tests --gtest_also_run_disabled_tests --gtest_filter='PriceIntegrity*'
+A strong fixed-point [`Price`](include/orderbook/price.h) type over `int64` at a 1e-4 scale.
+
+Why fixed-point and not "count of ticks": `Session` never stored a `tick_size` — it was a
+per-call parameter — so there was no authoritative tick to convert against, and two sessions
+with different ticks would produce mutually incomparable values the type system could not
+distinguish. A fixed scale makes `Price` self-describing, and lets `tick_size` go back to being
+what it actually is: a **quantization rule**, not a unit.
+
+Why a class and not a bare `int64_t`: the defect class being eliminated is "a number meaning one
+thing used as if it meant another." A bare integer price is silently interchangeable with
+`quantity` and `timestamp`; the class makes `order.price = order.quantity` a compile error, and
+refuses `price * price` (meaningless in fixed point without rescaling).
+
+The conversion boundary is JSON in/out only. Notably, **the `round(p/tick)*tick` quantization in
+`seed_orders` disappeared entirely** — with integer prices, `mid − tick*n` already lands exactly
+on the grid, so there is nothing left to round. That line was the origin of the defect.
+
+`spread` is now exact (`Price`), while `mid_price`, `spread_bps` and `vwap` stay `double` —
+a midpoint of an odd raw sum, a ratio, and a weighted average genuinely do not land on the grid.
+That boundary is deliberate and documented in the headers so nobody "integerizes" them later.
+
+### Also fixed: the `price_limit > 0` sentinel
+
+`match_against_book` used `price_limit > 0` to mean "no limit". Since `BookOrder`'s default price
+was 0 and the REST layer defaulted a missing `price` to 0, this was reachable:
+
+```json
+POST /orders {"order_type":"LIMIT","side":"BUY","quantity":100}
 ```
 
-Planned fix: a strong `int64` fixed-point price type, with double↔fixed-point conversion
-confined to the JSON boundary.
+produced a "limit order" that skipped both crossing checks and swept the entire opposite side.
+The limit parameter is now `std::optional<Price>`, where `std::nullopt` means unlimited — using
+a sentinel to fix a sentinel bug would have been self-defeating. The REST layer additionally
+rejects a non-MARKET order with no price, a non-positive price, or a non-positive quantity,
+with `400`.
+
+### Acceptance
+
+The three tests that were previously `DISABLED_` are now enabled and passing:
+`SameNominalPriceIsOneLevel`, `TimePriorityHoldsForSameNominalPrice`, and the strict
+differential run with mixed price algebra. There are now **zero disabled tests**.
 
 ---
 
@@ -364,7 +399,7 @@ systematically overstate strategy returns.
 ## Testing
 
 ```bash
-./build/orderbook_tests                              # 45 cases
+./build/orderbook_tests                              # 56 cases
 ./build/orderbook_tests --gtest_filter='Differential*'   # randomized differential test
 OB_SOAK_SEEDS=2000 ./build/orderbook_tests --gtest_filter='Differential*'   # soak run
 ./build/orderbook_tests --gtest_also_run_disabled_tests --gtest_filter='PriceIntegrity*'

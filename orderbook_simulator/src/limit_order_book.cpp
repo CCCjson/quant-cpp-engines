@@ -19,7 +19,7 @@ LimitOrderBook::LimitOrderBook() {
 // 查询方法
 // ============================================================
 
-std::optional<double> LimitOrderBook::best_bid() const {
+std::optional<Price> LimitOrderBook::best_bid() const {
     // std::optional 是 C++17 引入的类型，表示"可能有值，也可能没有"
     // 类似 Python 里返回 None 或一个值
     //
@@ -39,7 +39,7 @@ std::optional<double> LimitOrderBook::best_bid() const {
     return std::nullopt;   // 买盘为空，没有最优买价
 }
 
-std::optional<double> LimitOrderBook::best_ask() const {
+std::optional<Price> LimitOrderBook::best_ask() const {
     for (const auto& [price, level] : asks_) {
         if (!level.is_empty()) {
             return price;
@@ -48,7 +48,7 @@ std::optional<double> LimitOrderBook::best_ask() const {
     return std::nullopt;
 }
 
-std::optional<double> LimitOrderBook::spread() const {
+std::optional<Price> LimitOrderBook::spread() const {
     auto bb = best_bid();
     auto ba = best_ask();
     // 两边都有订单才能算价差
@@ -62,7 +62,9 @@ std::optional<double> LimitOrderBook::mid_price() const {
     auto bb = best_bid();
     auto ba = best_ask();
     if (bb && ba) {
-        return (*bb + *ba) / 2.0;
+        // 中间价可能落在网格之外（bid+ask 的 raw 和为奇数时），
+        // 所以在这里离开定点域、转成 double。这是刻意的，见 DepthSnapshot 的注释。
+        return (bb->to_double() + ba->to_double()) / 2.0;
     }
     return std::nullopt;
 }
@@ -91,13 +93,13 @@ DepthSnapshot LimitOrderBook::get_depth(int levels) const {
     // 计算价差和中间价
     auto s = spread();
     auto m = mid_price();
-    snapshot.spread = s.value_or(0.0);     // value_or：如果有值就用，没有就用默认值
+    snapshot.spread = s.value_or(Price());   // 没有买卖盘时价差记 0
     snapshot.mid_price = m.value_or(0.0);
 
     return snapshot;
 }
 
-int LimitOrderBook::bid_quantity_at(double price) const {
+int LimitOrderBook::bid_quantity_at(Price price) const {
     // find() 在 map 里查找 key，返回迭代器
     // 如果没找到，返回 end()
     auto it = bids_.find(price);
@@ -109,7 +111,7 @@ int LimitOrderBook::bid_quantity_at(double price) const {
     return 0;
 }
 
-int LimitOrderBook::ask_quantity_at(double price) const {
+int LimitOrderBook::ask_quantity_at(Price price) const {
     auto it = asks_.find(price);
     if (it != asks_.end()) {
         return it->second.total_quantity();
@@ -143,7 +145,7 @@ std::optional<BookOrder> LimitOrderBook::find_order(const std::string& order_id)
 // ============================================================
 
 void LimitOrderBook::add_order(BookOrder order) {
-    double price = order.price;
+    Price price = order.price;
     Side side = order.side;
 
     // 登记到 order_id 索引，供 O(1) 撤单用。

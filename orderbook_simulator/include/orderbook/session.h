@@ -94,8 +94,8 @@ public:
     /// 返回：实际生成了多少个订单
     int seed_orders(
         int count,
-        double mid_price,
-        double tick_size = 0.01,
+        Price mid_price,
+        TickSize tick_size = TickSize{},
         int spread_ticks = 2,
         int depth_ticks = 20,
         int min_qty = 100,

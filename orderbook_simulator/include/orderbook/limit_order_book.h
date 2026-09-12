@@ -47,13 +47,13 @@ namespace orderbook {
 
 /// 一档盘口信息（用于 get_depth 返回值）
 struct DepthLevel {
-    double price;
+    Price price;
     int quantity;       // 该价位总量
     int order_count;    // 该价位订单数
 
     nlohmann::json to_json() const {
         return {
-            {"price", price},
+            {"price", price.to_double()},
             {"quantity", quantity},
             {"order_count", order_count}
         };
@@ -64,8 +64,14 @@ struct DepthLevel {
 struct DepthSnapshot {
     std::vector<DepthLevel> bids;    // 买盘（从高到低）
     std::vector<DepthLevel> asks;    // 卖盘（从低到高）
-    double spread;                    // 买卖价差
-    double mid_price;                 // 中间价
+    /*
+     * spread 是两个价格之差，仍在网格上，所以是精确的 Price。
+     * mid_price 不是：(bid+ask)/2 在 raw 为奇数和时落在网格之外
+     * （例如 bid=100.0001, ask=100.0002），本来就不是一个可挂单的价格。
+     * 所以它保持 double，并且这一点是刻意的、写在这里备查。
+     */
+    Price spread;                     // 买卖价差（精确）
+    double mid_price;                 // 中间价（可能落在网格外，故为 double）
 
     nlohmann::json to_json() const {
         nlohmann::json j;
@@ -73,7 +79,7 @@ struct DepthSnapshot {
         for (const auto& b : bids) j["bids"].push_back(b.to_json());
         j["asks"] = nlohmann::json::array();
         for (const auto& a : asks) j["asks"].push_back(a.to_json());
-        j["spread"] = spread;
+        j["spread"] = spread.to_double();
         j["mid_price"] = mid_price;
         return j;
     }
@@ -93,14 +99,14 @@ public:
     ///   如果买盘有订单 → 返回最高买价
     ///   如果买盘为空   → 返回 std::nullopt（表示"没有值"）
     /// 为什么用 optional？因为订单簿可能是空的，没有最优价
-    std::optional<double> best_bid() const;
+    std::optional<Price> best_bid() const;
 
     /// 最优卖价（卖盘里要价最低的）
-    std::optional<double> best_ask() const;
+    std::optional<Price> best_ask() const;
 
     /// 买卖价差 = best_ask - best_bid
     /// 如果任何一边为空，返回 nullopt
-    std::optional<double> spread() const;
+    std::optional<Price> spread() const;
 
     /// 中间价 = (best_bid + best_ask) / 2
     std::optional<double> mid_price() const;
@@ -109,10 +115,10 @@ public:
     DepthSnapshot get_depth(int levels = 10) const;
 
     /// 获取买盘某价位上的总量（如果该价位不存在则返回 0）
-    int bid_quantity_at(double price) const;
+    int bid_quantity_at(Price price) const;
 
     /// 获取卖盘某价位上的总量
-    int ask_quantity_at(double price) const;
+    int ask_quantity_at(Price price) const;
 
     /// 通过 order_id 查找订单（可能在买盘或卖盘里）
     std::optional<BookOrder> find_order(const std::string& order_id) const;
@@ -150,13 +156,13 @@ private:
     //    99.50 → PriceLevel(99.50)
     //
     // 默认的 map 是从小到大排的，但买盘需要最高价在前面
-    std::map<double, PriceLevel, std::greater<double>> bids_;
+    std::map<Price, PriceLevel, std::greater<Price>> bids_;
 
     // 卖盘：默认升序就行（最低卖价在前面）
     //   101.00 → PriceLevel(101.00)   ← begin() 指向这里（最低卖价）
     //   101.50 → PriceLevel(101.50)
     //   102.00 → PriceLevel(102.00)
-    std::map<double, PriceLevel> asks_;
+    std::map<Price, PriceLevel> asks_;
 
     /*
      * ── order_id → 所在档位 的索引 ──
@@ -180,7 +186,7 @@ private:
      * 「撤一个已成交订单」的正确答案。忘记清理只会让索引变大，不会让行为出错。
      * 这个性质是刻意设计的：让容易忘的事只影响内存，不影响语义。
      */
-    std::unordered_map<std::string, std::pair<Side, double>> index_;
+    std::unordered_map<std::string, std::pair<Side, Price>> index_;
 
 public:
     /// 把这些 order_id 从索引里移除（它们已因全部成交而离开簿）

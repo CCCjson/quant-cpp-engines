@@ -35,6 +35,7 @@
 #ifndef ORDERBOOK_MATCHING_ENGINE_H
 #define ORDERBOOK_MATCHING_ENGINE_H
 
+#include <optional>
 #include <vector>
 #include "orderbook/types.h"
 #include "orderbook/limit_order_book.h"
@@ -94,18 +95,29 @@ private:
     MatchResult handle_fok_order(LimitOrderBook& book, BookOrder& order);
 
     /// 通用的撮合逻辑：买单吃卖盘 / 卖单吃买盘
-    /// 参数 price_limit：限价单的价格上限/下限（市价单传 0 表示不限）
+    /// 参数 price_limit：限价单的价格上限/下限。
+    ///
+    /// ⚠️ 类型是 std::optional<Price>，`std::nullopt` 表示「不限价」。
+    ///
+    /// 原来这里是 `double price_limit`，用 `price_limit > 0` 表示不限价 ——
+    /// 这个哨兵把「无上限」和「价格为 0」混为一谈，而且是可达的缺陷：
+    /// BookOrder 的默认价格是 0，REST 层对缺失的 price 也默认 0，于是
+    ///     POST /orders {"order_type":"LIMIT","side":"BUY","quantity":100}
+    /// 会产生一个跳过全部越价检查、像市价单一样扫光整个卖盘的「限价单」。
+    ///
+    /// 用 optional 之后，「不限价」是类型上的一种状态，不再需要挑一个
+    /// 合法取值去代表它。（用哨兵去修哨兵造成的缺陷是自找麻烦。）
     std::vector<Fill> match_against_book(
         LimitOrderBook& book,
         BookOrder& order,
-        double price_limit
+        std::optional<Price> price_limit
     );
 
     /// 计算对手盘在指定价格范围内的总可用数量（FOK 检查用）
     int available_quantity(
         const LimitOrderBook& book,
         Side aggressor_side,
-        double price_limit
+        std::optional<Price> price_limit
     ) const;
 };
 
