@@ -28,6 +28,57 @@ def build_en(g: dict) -> str:
     # 双花括号是转义，结果会原样输出 "{n:,} bars"（踩过）。
     size_hdr = " | ".join(f"{n:,} bars" for n in g["SIZES"])
 
+    # parity 表的指标名来自 parity.json（中文），英文版要翻
+    _metric_en = {
+        "最终资产": "Final equity", "总收益率": "Total return",
+        "年化收益率": "Annualized return", "最大回撤": "Max drawdown",
+        "回撤金额": "Drawdown amount", "总手续费": "Total commission",
+        "胜率": "Win rate",
+    }
+    parity_rows_en = [
+        "| {m} | {py:,.8f} | {cpp:,.8f} | {d:.2e} |".format(
+            m=_metric_en.get(c["metric"], c["metric"]),
+            py=c["python"], cpp=c["cpp"], d=c["diff"])
+        for c in g["parity"]["comparisons"]
+    ]
+
+    # H5 的操作名同理（pd_rows 的第一列是中文标签）
+    _op_en = {
+        "`df.iloc[i]['close']` 取单值": "`df.iloc[i]['close']` scalar lookup",
+        "`df.iloc[:i+1]` 切历史窗口": "`df.iloc[:i+1]` history slice",
+        "`df['ma5'].iloc[-1]` 读指标": "`df['ma5'].iloc[-1]` indicator read",
+    }
+    pd_table_en = [
+        f"| {_op_en.get(label, label)} | {pv:.3f} µs | {nv:.3f} µs | **{pv / nv:.0f}×** |"
+        for label, pv, nv in g["pd_rows"]
+    ]
+
+    # 增量实验表（"逐位相同" 那一列）
+    incr_rows_en = [
+        "| {b:,} | {a} | {c} | **{sp:.1f}×** | {ok} |".format(
+            b=r["bars"], a=g["ms"](r["macd_naive_min"]), c=g["ms"](r["macd_incr_min"]),
+            sp=r["speedup"],
+            ok="✅ bit-identical" if r["bitwise_identical"] else "❌ differs")
+        for r in g["incr"]
+    ]
+
+    # 复杂度拟合表：标签与判定都要英文，不能与中文版共用 fit_rows
+    _label_en = {
+        "MACD（改动前 O(N²)）": "MACD (before the fix, O(N²))",
+        "MACD（增量原型）": "MACD (incremental prototype)",
+        "MACD（引擎当前）": "MACD (engine now)",
+        "RSI（引擎当前）": "RSI (engine now)",
+        "KDJ（引擎当前）": "KDJ (engine now)",
+    }
+    fit_rows_en = []
+    for key in sorted(g["fit"]):
+        k = g["fit"][key]
+        eng, strat = key.split("/", 1)
+        verdict = ("**O(N)** linear" if k < 1.25
+                   else ("**O(N²)** quadratic" if k > 1.7 else "in between"))
+        fit_rows_en.append(
+            f"| {eng} | `{_label_en.get(strat, strat)}` | **{k:.3f}** | {verdict} |")
+
     # 第三轮表格行（英文版单独构造，避免与中文版共用「逐位相同」这类字样）
     r3_rows_en = [
         "| {b:,} | {a} | {c} | **{sp:.0f}×** | {ok} |".format(
@@ -98,7 +149,7 @@ computing the same thing, and timing them against each other is meaningless.
 
 | Metric | Python | C++ | Diff |
 |---|---|---|---|
-{NL.join(parity_rows)}
+{NL.join(parity_rows_en)}
 
 **All seven at `0.00e+00`** — not "within tolerance," bit-identical.
 Gate script: [`parity_gate.py`](parity_gate.py), output:
@@ -161,9 +212,17 @@ gives the order directly: `t ∝ N^k` → `log t = k·log N + c`.
 
 | Engine | Strategy | Fitted slope k | Verdict |
 |---|---|---|---|
-{NL.join(fit_rows)}
+{NL.join(fit_rows_en)}
 
-**Python is k ≈ 1.00 across the board; three C++ strategies are k ≈ 1.95.**
+**Python is k ≈ 1.00 across the board; C++'s MACD, *as it was before the fix*, is k ≈ 1.97 — quadratic.**
+
+> The C++ rows are labelled "before the fix / incremental prototype / engine now". When this
+> investigation was written, `MACD` / `RSI` / `KDJ` were all k ≈ 1.95; those three are now
+> incremental in the engine and their slopes have dropped to k ≈ 1.06 (see
+> [Round three](#round-three-fixed-then-re-measured)), which is why the "engine now" rows are
+> linear. **The "before the fix" row is measured live from the original implementation frozen
+> into the benchmark**, not copied from an old record — otherwise the conclusion would not be
+> reproducible.
 
 Open the source and the reason is immediate — the indicator helpers on `StrategyContext`
 ([`strategy_context.h`](../backtest_engine/include/backtest/strategy_context.h))
@@ -186,7 +245,7 @@ is that the EMA state is carried forward, making each bar O(1) with zero heap al
 
 | Bars | Original O(N²) | Incremental O(N) | Speedup | Result check |
 |---|---|---|---|---|
-{NL.join(incr_rows)}
+{NL.join(incr_rows_en)}
 
 The speedup grows **monotonically** with size — that is the fingerprint of O(N²)→O(N).
 
@@ -273,7 +332,7 @@ Measuring the specific operations inside each bar, against the same operations o
 
 | Operation | pandas DataFrame | numpy array | Ratio |
 |---|---|---|---|
-{NL.join(pd_table)}
+{NL.join(pd_table_en)}
 
 The Python engine measures **{pdo['engine_total_per_bar_us']:.1f} µs per bar**, of which
 **{pdo['pandas_ops_per_bar_us']:.1f} µs ({pdo['pandas_share']:.0%})** goes purely into
@@ -293,7 +352,16 @@ scalar access is its worst possible use.
 What remains after that is genuine interpreter overhead — and that part can only be addressed
 by changing language.
 
-Raw data: [`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json)
+> ⚠️ This experiment ran in a **different environment** from the main benchmark table:
+> Python {pdo['environment']['python']} / pandas {pdo['environment']['pandas']} /
+> numpy {pdo['environment']['numpy']} (the main table used {env['python']} /
+> pandas {env['pandas']}). The absolute microsecond figures therefore cannot be added to the
+> main table's — but what matters here is the **share**, and the share is insensitive to
+> version. The environment is recorded in the result file's own `environment` block rather
+> than left to guesswork.
+
+Raw data: [`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json),
+produced by [`exp_pandas_overhead.py`](exp_pandas_overhead.py)
 
 ### H6 · Transport layer ✅ confirmed, but only fatal for small jobs
 
@@ -626,6 +694,38 @@ Raw data: [`results/orderbook.json`](results/orderbook.json) (after) ·
 
 ## What was done to make these numbers trustworthy
 
+### Every result file now has a generator
+
+This report opens by claiming every number can be traced to a file in `results/`. For a while
+that claim was discounted: of the 8 result files, only 3 had a committed generator — the rest
+came from one-off scripts that were thrown away. For a report whose selling point is its
+methodology, that is the most damaging gap possible, because the readers who actually try to
+reproduce it are exactly the ones worth convincing.
+
+They are all committed now:
+
+| Result file | Generator |
+|---|---|
+| `backtest.json` | [`bench.py`](bench.py) |
+| `parity.json` | [`parity_gate.py`](parity_gate.py) |
+| `orderbook.json` | [`bench_orderbook.cpp`](bench_orderbook.cpp) (redirected to file) |
+| `complexity_fit.json` · `experiment_incremental.json` · `experiment_allocation.json` | [`exp_cpp_experiments.py`](exp_cpp_experiments.py) |
+| `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
+| `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
+| `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+
+As a self-check after backfilling: re-running `backtest_py313.json` with the new generator
+landed within about 1% of the original record **on the same interpreter** (for instance
+`MA_CROSS` at 25,000 bars: 1,048.879 → 1,039.113 ms). The new script faithfully reproduces what
+the discarded one-off did.
+
+⚠️ One thing to be explicit about: `backtest.json` is a snapshot of the **investigation as it
+stood** (the C++ side is still the pre-fix O(N²) implementation). It has deliberately not been
+re-run, because round one's falsification — "MACD is only 0.9×" — rests on that data. The
+post-fix re-measurement is given separately in
+[round three](#round-three-fixed-then-re-measured), using the control arm frozen into the
+benchmark. Each dataset describes one clearly identified point in time rather than blending them.
+
 ### Environment
 
 | Item | Value |
@@ -844,9 +944,15 @@ python3 benchmarks/parity_gate.py
 
 # 4. Benchmarks (must be serial — running them in parallel makes them fight for CPU)
 ./orderbook_simulator/build/bench_orderbook 1 > benchmarks/results/orderbook.json
-python3 benchmarks/bench.py
+python3 benchmarks/bench.py                      # main table (investigation-time snapshot)
 
-# 5. Regenerate this document (both language versions)
+# 5. Controlled experiments (every result file has a generator)
+python3 benchmarks/exp_cpp_experiments.py        # complexity fit / incremental / allocation
+python3 benchmarks/exp_incremental_engine.py     # round three: post-fix re-measurement
+python3 benchmarks/exp_pandas_overhead.py        # H5 data structures
+python3 benchmarks/bench_py_version.py           # Python version comparison
+
+# 6. Regenerate this document (both language versions)
 python3 benchmarks/make_report.py
 ```
 

@@ -1,15 +1,21 @@
 {
   "bars": 25000,
   "per_op_us": {
-    "engine: df.iloc[i]['close']  取当前收盘价": 10.37041874951683,
-    "engine: df.iloc[i]['open']   取成交价": 10.309862496796995,
-    "engine: df.iloc[:i+1]        切历史窗口": 7.631466700695454,
-    "strategy: df['ma5'].iloc[-1] 读指标（×4 次/bar）": 2.0772937510628253,
-    "numpy: arr_close[i]": 0.027550000231713057,
-    "numpy: arr_close[:i+1]  （视图，零拷贝）": 0.05177704733796418,
-    "numpy: arr_ma5[i]": 0.028245849534869194
+    "engine: df.iloc[i]['close']  取当前收盘价": 6.774104025680572,
+    "engine: df.iloc[i]['open']   取成交价": 6.835228996351361,
+    "engine: df.iloc[:i+1]        切历史窗口": 4.9172500148415565,
+    "strategy: df['ma5'].iloc[-1] 读指标（×4 次/bar）": 1.3604579726234078,
+    "numpy: arr_close[i]": 0.02156250411644578,
+    "numpy: arr_close[:i+1]  （视图，零拷贝）": 0.042791536543518305,
+    "numpy: arr_ma5[i]": 0.021916988771408796
   },
-  "pandas_ops_per_bar_us": 36.62092295126058,
-  "engine_total_per_bar_us": 57.00156832113862,
-  "pandas_share": 0.6424546557200599
+  "pandas_ops_per_bar_us": 23.96841492736712,
+  "engine_total_per_bar_us": 39.596978360787034,
+  "pandas_share": 0.6053091907412584,
+  "_README": "H5：把每根 bar 里的 DataFrame 标量索引/切片单独计时，与 numpy 数组上的同一操作对照。由 exp_pandas_overhead.py 生成。per_op_us 的键名含中文，make_report.py 按字面查表，不要改动。",
+  "environment": {
+    "pandas": "2.3.3",
+    "numpy": "2.3.5",
+    "python": "3.13.11"
+  }
 }

@@ -322,7 +322,13 @@ doc_zh = f"""# 快慢到底由什么决定 —— 一次从假设到证伪的性
 |---|---|---|---|
 {NL.join(fit_rows)}
 
-**Python 全线 k ≈ 1.00，C++ 三个策略 k ≈ 1.95。**
+**Python 全线 k ≈ 1.00；C++ 的 MACD 在**改动前**是 k ≈ 1.97 —— 二次。**
+
+> 表里 C++ 各行标注了「改动前 / 增量原型 / 引擎当前」。写这份调查时，
+> `MACD` / `RSI` / `KDJ` 三条都是 k ≈ 1.95；现在引擎里那三个已经改成增量递推、
+> 斜率掉到 k ≈ 1.06（见[第三轮](#第三轮修复与复测)），所以「引擎当前」那几行是线性的。
+> **「改动前 O(N²)」那一行是从冻结在 benchmark 里的原实现当场测出来的**，
+> 不是从旧记录抄的 —— 否则这个结论就不可复现了。
 
 翻开源码，原因一目了然 —— `StrategyContext` 里的指标 helper
 （[`strategy_context.h`](../backtest_engine/include/backtest/strategy_context.h)）
@@ -438,7 +444,14 @@ DataFrame 是为**整列批量运算**设计的：每次 `df.iloc[i]['close']` �
 
 剩下的那部分才是真正的解释器开销 —— 那部分只能靠换语言解决。
 
-原始数据：[`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json)
+> ⚠️ 这个实验的运行环境**与主跑分表不同**：Python {pdo['environment']['python']} /
+> pandas {pdo['environment']['pandas']} / numpy {pdo['environment']['numpy']}
+> （主表是 {env['python']} / pandas {env['pandas']}）。绝对微秒数因此不可与主表直接相加，
+> 但这里要看的是**占比**，而占比对版本不敏感。环境记录在结果文件自己的
+> environment 块里，不用去猜。
+
+原始数据：[`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json)，
+由 [`exp_pandas_overhead.py`](exp_pandas_overhead.py) 生成
 
 ### H6 · 传输层 ✅ 成立，但只对小任务致命
 
@@ -741,6 +754,33 @@ harness 不同的 before/after 不可比，这一点比多报一个倍数重要�
 
 ## 为了让这些数字可信，做了什么
 
+### 每个结果文件都有生成脚本了
+
+这份报告开篇声称「每个数字都能在 `results/` 里找到出处」。有一段时间那句话是打折的：
+8 个结果文件里只有 3 个有提交的生成脚本，其余是一次性脚本跑完就丢了。
+对一个把方法论当卖点的报告，这是最伤的一处 —— 会真去核对的读者恰恰是最该说服的人。
+
+现在全部补齐：
+
+| 结果文件 | 生成脚本 |
+|---|---|
+| `backtest.json` | [`bench.py`](bench.py) |
+| `parity.json` | [`parity_gate.py`](parity_gate.py) |
+| `orderbook.json` | [`bench_orderbook.cpp`](bench_orderbook.cpp)（重定向到文件） |
+| `complexity_fit.json` · `experiment_incremental.json` · `experiment_allocation.json` | [`exp_cpp_experiments.py`](exp_cpp_experiments.py) |
+| `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
+| `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
+| `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+
+补完之后做了一次自我核对：用新脚本重跑 `backtest_py313.json`，
+与原来那份**同一解释器**下的记录相差约 1%（例如 25,000 根的 `MA_CROSS`
+1,048.879 → 1,039.113 ms）。也就是说新脚本忠实复现了当初那个一次性脚本做的事。
+
+⚠️ 需要说明一点：`backtest.json` 是**调查当时**的快照（C++ 侧还是改动前的 O(N²)
+实现）。它没有被重跑，因为第一轮「MACD 只有 0.9×」那个证伪结论正是建立在那份数据上；
+修复后的复测在[第三轮](#第三轮修复与复测)单独给出，用的是冻结在 benchmark 里的对照臂。
+两份数据各自描述一个明确的时点，而不是混在一起。
+
 ### 环境
 
 | 项 | 值 |
@@ -930,9 +970,15 @@ python3 benchmarks/parity_gate.py
 
 # 4. 跑分（必须串行，别并行 —— 会互抢 CPU）
 ./orderbook_simulator/build/bench_orderbook 1 > benchmarks/results/orderbook.json
-python3 benchmarks/bench.py
+python3 benchmarks/bench.py                      # 主跑分表（调查当时的快照）
 
-# 5. 重新生成本文档
+# 5. 对照实验（每个结果文件都有对应脚本）
+python3 benchmarks/exp_cpp_experiments.py        # 复杂度拟合 / 增量 / 分配
+python3 benchmarks/exp_incremental_engine.py     # 第三轮：修复后复测
+python3 benchmarks/exp_pandas_overhead.py        # H5 数据结构
+python3 benchmarks/bench_py_version.py           # Python 版本对照
+
+# 6. 重新生成本文档（同时产出中英两版）
 python3 benchmarks/make_report.py
 ```
 

@@ -59,13 +59,13 @@ computing the same thing, and timing them against each other is meaningless.
 
 | Metric | Python | C++ | Diff |
 |---|---|---|---|
-| 最终资产 | 1,448,492.33183950 | 1,448,492.33183950 | 0.00e+00 |
-| 总收益率 | 0.44849233 | 0.44849233 | 0.00e+00 |
-| 年化收益率 | 0.67989710 | 0.67989710 | 0.00e+00 |
-| 最大回撤 | 0.09834732 | 0.09834732 | 0.00e+00 |
-| 回撤金额 | 119,475.72569250 | 119,475.72569250 | 0.00e+00 |
-| 总手续费 | 3,612.75016050 | 3,612.75016050 | 0.00e+00 |
-| 胜率 | 1.00000000 | 1.00000000 | 0.00e+00 |
+| Final equity | 1,448,492.33183950 | 1,448,492.33183950 | 0.00e+00 |
+| Total return | 0.44849233 | 0.44849233 | 0.00e+00 |
+| Annualized return | 0.67989710 | 0.67989710 | 0.00e+00 |
+| Max drawdown | 0.09834732 | 0.09834732 | 0.00e+00 |
+| Drawdown amount | 119,475.72569250 | 119,475.72569250 | 0.00e+00 |
+| Total commission | 3,612.75016050 | 3,612.75016050 | 0.00e+00 |
+| Win rate | 1.00000000 | 1.00000000 | 0.00e+00 |
 
 **All seven at `0.00e+00`** — not "within tolerance," bit-identical.
 Gate script: [`parity_gate.py`](parity_gate.py), output:
@@ -131,17 +131,26 @@ gives the order directly: `t ∝ N^k` → `log t = k·log N + c`.
 
 | Engine | Strategy | Fitted slope k | Verdict |
 |---|---|---|---|
-| C++ | `KDJ` | **1.934** | **O(N²)** 二次 |
-| C++ | `MACD` | **1.982** | **O(N²)** 二次 |
-| C++ | `MACD_INCREMENTAL` | **1.048** | **O(N)** 线性 |
-| C++ | `MA_CROSS` | **1.060** | **O(N)** 线性 |
-| C++ | `RSI` | **1.968** | **O(N²)** 二次 |
-| Python | `KDJ` | **0.999** | **O(N)** 线性 |
-| Python | `MACD` | **1.007** | **O(N)** 线性 |
-| Python | `MA_CROSS` | **1.001** | **O(N)** 线性 |
-| Python | `RSI` | **0.995** | **O(N)** 线性 |
+| C++ | `KDJ (engine now)` | **1.072** | **O(N)** linear |
+| C++ | `MACD (incremental prototype)` | **1.062** | **O(N)** linear |
+| C++ | `MACD (engine now)` | **1.054** | **O(N)** linear |
+| C++ | `MACD (before the fix, O(N²))` | **1.970** | **O(N²)** quadratic |
+| C++ | `MA_CROSS` | **1.066** | **O(N)** linear |
+| C++ | `RSI (engine now)` | **1.052** | **O(N)** linear |
+| Python | `KDJ` | **0.999** | **O(N)** linear |
+| Python | `MACD` | **1.007** | **O(N)** linear |
+| Python | `MA_CROSS` | **1.001** | **O(N)** linear |
+| Python | `RSI` | **0.995** | **O(N)** linear |
 
-**Python is k ≈ 1.00 across the board; three C++ strategies are k ≈ 1.95.**
+**Python is k ≈ 1.00 across the board; C++'s MACD, *as it was before the fix*, is k ≈ 1.97 — quadratic.**
+
+> The C++ rows are labelled "before the fix / incremental prototype / engine now". When this
+> investigation was written, `MACD` / `RSI` / `KDJ` were all k ≈ 1.95; those three are now
+> incremental in the engine and their slopes have dropped to k ≈ 1.06 (see
+> [Round three](#round-three-fixed-then-re-measured)), which is why the "engine now" rows are
+> linear. **The "before the fix" row is measured live from the original implementation frozen
+> into the benchmark**, not copied from an old record — otherwise the conclusion would not be
+> reproducible.
 
 Open the source and the reason is immediate — the indicator helpers on `StrategyContext`
 ([`strategy_context.h`](../backtest_engine/include/backtest/strategy_context.h))
@@ -164,19 +173,19 @@ is that the EMA state is carried forward, making each bar O(1) with zero heap al
 
 | Bars | Original O(N²) | Incremental O(N) | Speedup | Result check |
 |---|---|---|---|---|
-| 250 | 0.407 | 0.047 | **8.6×** | ✅ 逐位相同 |
-| 1,000 | 2.617 | 0.201 | **13.0×** | ✅ 逐位相同 |
-| 2,500 | 16.786 | 0.510 | **32.9×** | ✅ 逐位相同 |
-| 10,000 | 279.823 | 2.329 | **120.1×** | ✅ 逐位相同 |
-| 25,000 | 1,604.383 | 5.782 | **277.5×** | ✅ 逐位相同 |
+| 250 | 0.175 | 0.044 | **4.0×** | ✅ bit-identical |
+| 1,000 | 2.270 | 0.179 | **12.7×** | ✅ bit-identical |
+| 2,500 | 14.533 | 0.495 | **29.4×** | ✅ bit-identical |
+| 10,000 | 239.307 | 2.051 | **116.7×** | ✅ bit-identical |
+| 25,000 | 1,444.018 | 5.866 | **246.2×** | ✅ bit-identical |
 
 The speedup grows **monotonically** with size — that is the fingerprint of O(N²)→O(N).
 
 And the most important line is hidden inside the numbers: at 25,000 bars the incremental MACD
-takes 5.782 ms while `MA_CROSS` takes 5.899 ms —
+takes 5.866 ms while `MA_CROSS` takes 5.899 ms —
 **essentially the same**. Fix the algorithm and MACD immediately returns to `MA_CROSS`'s
 magnitude; its ratio against Python goes from **0.9× (losing)
-to 248× (winning)**, in line with `MA_CROSS`'s
+to 245× (winning)**, in line with `MA_CROSS`'s
 242×.
 
 > **Conclusion**: "the C++ MACD backtest loses to Python" has nothing to do with the language.
@@ -207,7 +216,7 @@ the overwhelming majority of that 2,963× is complexity order, not
 vectorization.
 
 Swap in **well-written C++** and the conclusion changes immediately: the incremental version
-from H2 runs the entire backtest in 5.782 ms, and within it the
+from H2 runs the entire backtest in 5.866 ms, and within it the
 indicator work (four floating-point operations per bar) is essentially free — that is,
 **correctly implemented C++ does not lose to numpy on indicator computation, and is faster.**
 
@@ -232,19 +241,19 @@ O(N²)), but reuses one block of memory for its four buffers, allocating nothing
 
 | Bars | Original<br>O(N²)+alloc | No-alloc<br>O(N²) | Incremental<br>O(N) | Alloc<br>share | Algorithm<br>share |
 |---|---|---|---|---|---|
-| 250 | 0.464 | 0.127 | 0.045 | 80% | 20% |
-| 1,000 | 2.618 | 1.653 | 0.192 | 40% | 60% |
-| 2,500 | 16.645 | 9.597 | 0.489 | 44% | 56% |
-| 10,000 | 275.277 | 154.403 | 2.259 | 44% | 56% |
-| 25,000 | 1,692.332 | 983.385 | 5.880 | 42% | 58% |
+| 250 | 0.175 | 0.117 | 0.044 | 44% | 56% |
+| 1,000 | 2.270 | 1.431 | 0.179 | 40% | 60% |
+| 2,500 | 14.533 | 8.370 | 0.495 | 44% | 56% |
+| 10,000 | 239.307 | 132.333 | 2.051 | 45% | 55% |
+| 25,000 | 1,444.018 | 826.510 | 5.866 | 43% | 57% |
 
 All three versions produce **identical results**. Allocation accounts for roughly
-**42%** of the available headroom, the algorithm for
-**58%**.
+**43%** of the available headroom, the algorithm for
+**57%**.
 
 But there is a more important observation: eliminating allocation buys only
 **1.7×**, and the no-alloc version **is still quadratic** (slope k ≈
-2.02 over the last two sizes).
+2.00 over the last two sizes).
 
 > **Allocation optimization buys a constant factor; algorithmic optimization buys an order.**
 > At scale, constant factors stop being worth much.
@@ -259,29 +268,38 @@ Measuring the specific operations inside each bar, against the same operations o
 
 | Operation | pandas DataFrame | numpy array | Ratio |
 |---|---|---|---|
-| `df.iloc[i]['close']` 取单值 | 10.370 µs | 0.028 µs | **376×** |
-| `df.iloc[:i+1]` 切历史窗口 | 7.631 µs | 0.052 µs | **147×** |
-| `df['ma5'].iloc[-1]` 读指标 | 2.077 µs | 0.028 µs | **74×** |
+| `df.iloc[i]['close']` scalar lookup | 6.774 µs | 0.022 µs | **314×** |
+| `df.iloc[:i+1]` history slice | 4.917 µs | 0.043 µs | **115×** |
+| `df['ma5'].iloc[-1]` indicator read | 1.360 µs | 0.022 µs | **62×** |
 
-The Python engine measures **57.0 µs per bar**, of which
-**36.6 µs (64%)** goes purely into
+The Python engine measures **39.6 µs per bar**, of which
+**24.0 µs (61%)** goes purely into
 DataFrame scalar lookups and slicing.
 
 A DataFrame is designed for **whole-column batch operations**: every `df.iloc[i]['close']`
 goes through index resolution, type dispatch and return-object construction. Element-wise
 scalar access is its worst possible use.
 
-> **Of the claim "Python is slow," 64% is not a Python problem at all —
+> **Of the claim "Python is slow," 61% is not a Python problem at all —
 > it is the wrong data structure.** Replacing the DataFrame with numpy arrays (without changing
 > the semantics of a single line of Python) should bring per-bar cost from
-> 57.0 µs down to about
-> 20.4 µs — roughly
-> 2.8× faster.
+> 39.6 µs down to about
+> 15.6 µs — roughly
+> 2.5× faster.
 
 What remains after that is genuine interpreter overhead — and that part can only be addressed
 by changing language.
 
-Raw data: [`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json)
+> ⚠️ This experiment ran in a **different environment** from the main benchmark table:
+> Python 3.13.11 / pandas 2.3.3 /
+> numpy 2.3.5 (the main table used 3.10.19 /
+> pandas 2.1.4). The absolute microsecond figures therefore cannot be added to the
+> main table's — but what matters here is the **share**, and the share is insensitive to
+> version. The environment is recorded in the result file's own `environment` block rather
+> than left to guesswork.
+
+Raw data: [`results/experiment_pandas_overhead.json`](results/experiment_pandas_overhead.json),
+produced by [`exp_pandas_overhead.py`](exp_pandas_overhead.py)
 
 ### H6 · Transport layer ✅ confirmed, but only fatal for small jobs
 
@@ -343,27 +361,27 @@ At 25,000 bars:
 
 | Strategy | Python 3.10.19 | Python 3.13.11 | Newer is faster by | C++ lead changes |
 |---|---|---|---|---|
-| `MA_CROSS` | 1,425.039 | 1,048.879 | **1.36×** | 241.6× → **177.8×** |
-| `MACD` | 1,434.647 | 1,034.421 | **1.39×** | 0.9× → **0.6×** |
-| `RSI` | 1,151.085 | 841.533 | **1.37×** | 1.1× → **0.8×** |
-| `KDJ` | 1,378.555 | 1,007.678 | **1.37×** | 1.4× → **1.0×** |
+| `MA_CROSS` | 1,425.039 | 1,039.113 | **1.37×** | 241.6× → **176.2×** |
+| `MACD` | 1,434.647 | 1,025.112 | **1.40×** | 0.9× → **0.6×** |
+| `RSI` | 1,151.085 | 829.657 | **1.39×** | 1.1× → **0.8×** |
+| `KDJ` | 1,378.555 | 1,010.517 | **1.36×** | 1.4× → **1.0×** |
 
-**Python 3.13.11 is about 1.36× faster**, and that speedup cuts two ways:
+**Python 3.13.11 is about 1.37× faster**, and that speedup cuts two ways:
 
 - it **weakens** the "language" factor: on `MA_CROSS`, C++'s lead drops from
-  242× to **178×**
+  242× to **176×**
 - it **strengthens** the core conclusion: on `MACD`, C++ goes from
   0.9× to **0.62×** — **losing by more**
 
 On 3.13.11, C++ **loses or ties on three of the four strategies** — `MACD`
 0.62×, `RSI`
-0.78×,
+0.76×,
 `KDJ`
 1.01× —
 holding its lead only on `MA_CROSS`.
 
-> Worth noting: the "language/runtime" factor itself moves by **36%** just
-> from a Python point release. The 277× from O(N²)→O(N) is structural
+> Worth noting: the "language/runtime" factor itself moves by **37%** just
+> from a Python point release. The 246× from O(N²)→O(N) is structural
 > and does not drift with the environment.
 > **That is itself further evidence for "don't treat language as the primary variable."**
 
@@ -377,9 +395,9 @@ Ordered by impact on final runtime:
 
 | # | Factor | Magnitude | Nature | Fixable |
 |---|---|---|---|---|
-| 1 | **Algorithmic order** O(N²)→O(N) | up to **277×**, grows with N | complexity order | ✅ yes, biggest win |
-| 2 | **Language / runtime** | **178–242×** (range from Python version) | constant factor | ⚠️ requires changing language |
-| 3 | **Data structure** (pandas scalar indexing) | about **2.8×** | constant factor | ✅ switch to numpy arrays |
+| 1 | **Algorithmic order** O(N²)→O(N) | up to **246×**, grows with N | complexity order | ✅ yes, biggest win |
+| 2 | **Language / runtime** | **176–242×** (range from Python version) | constant factor | ⚠️ requires changing language |
+| 3 | **Data structure** (pandas scalar indexing) | about **2.5×** | constant factor | ✅ switch to numpy arrays |
 | 4 | **Heap allocation** | **1.7×** | constant factor | ✅ buffer reuse |
 | 5 | **Transport layer** | **91%** of small jobs | fixed overhead | ✅ batch / in-process calls |
 | 6 | **Cold start** | **386 ms** once | fixed overhead | ⚠️ amortized by a long-lived process |
@@ -387,10 +405,10 @@ Ordered by impact on final runtime:
 
 **The most important line is the comparison between rows 1 and 2:**
 
-In this dataset, **the gap from algorithmic order (up to 277×) is larger
-than the gap from language choice (178–242×)**,
+In this dataset, **the gap from algorithmic order (up to 246×) is larger
+than the gap from language choice (176–242×)**,
 and the former grows without bound in N and does not drift with the environment, while the
-latter is a bounded constant that moves 36% on a Python point release.
+latter is a bounded constant that moves 37% on a Python point release.
 
 So "should this be C++ or Python" is mostly the wrong question. The question to ask is:
 **can this computation be done once instead of recomputed at every step.**
@@ -447,10 +465,10 @@ different claim from "Python is faster."
 **2. Someone in the ecosystem already wrote the hard part in C**
 
 Using Python does not mean running at Python speed. What matters is whether the hot path lands
-in the interpreter or in a library. 64% of this Python engine's time went
+in the interpreter or in a library. 61% of this Python engine's time went
 into pandas scalar indexing (H5) — the classic symptom of a hot path falling back into the
 interpreter and object layer. Same library, and using it right versus wrong differs by
-376×.
+314×.
 
 **3. Cost to write and change** — 1,431 lines vs 8,570 lines
 
@@ -625,6 +643,38 @@ Raw data: [`results/orderbook.json`](results/orderbook.json) (after) ·
 ---
 
 ## What was done to make these numbers trustworthy
+
+### Every result file now has a generator
+
+This report opens by claiming every number can be traced to a file in `results/`. For a while
+that claim was discounted: of the 8 result files, only 3 had a committed generator — the rest
+came from one-off scripts that were thrown away. For a report whose selling point is its
+methodology, that is the most damaging gap possible, because the readers who actually try to
+reproduce it are exactly the ones worth convincing.
+
+They are all committed now:
+
+| Result file | Generator |
+|---|---|
+| `backtest.json` | [`bench.py`](bench.py) |
+| `parity.json` | [`parity_gate.py`](parity_gate.py) |
+| `orderbook.json` | [`bench_orderbook.cpp`](bench_orderbook.cpp) (redirected to file) |
+| `complexity_fit.json` · `experiment_incremental.json` · `experiment_allocation.json` | [`exp_cpp_experiments.py`](exp_cpp_experiments.py) |
+| `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
+| `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
+| `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+
+As a self-check after backfilling: re-running `backtest_py313.json` with the new generator
+landed within about 1% of the original record **on the same interpreter** (for instance
+`MA_CROSS` at 25,000 bars: 1,048.879 → 1,039.113 ms). The new script faithfully reproduces what
+the discarded one-off did.
+
+⚠️ One thing to be explicit about: `backtest.json` is a snapshot of the **investigation as it
+stood** (the C++ side is still the pre-fix O(N²) implementation). It has deliberately not been
+re-run, because round one's falsification — "MACD is only 0.9×" — rests on that data. The
+post-fix re-measurement is given separately in
+[round three](#round-three-fixed-then-re-measured), using the control arm frozen into the
+benchmark. Each dataset describes one clearly identified point in time rather than blending them.
 
 ### Environment
 
@@ -848,9 +898,15 @@ python3 benchmarks/parity_gate.py
 
 # 4. Benchmarks (must be serial — running them in parallel makes them fight for CPU)
 ./orderbook_simulator/build/bench_orderbook 1 > benchmarks/results/orderbook.json
-python3 benchmarks/bench.py
+python3 benchmarks/bench.py                      # main table (investigation-time snapshot)
 
-# 5. Regenerate this document (both language versions)
+# 5. Controlled experiments (every result file has a generator)
+python3 benchmarks/exp_cpp_experiments.py        # complexity fit / incremental / allocation
+python3 benchmarks/exp_incremental_engine.py     # round three: post-fix re-measurement
+python3 benchmarks/exp_pandas_overhead.py        # H5 data structures
+python3 benchmarks/bench_py_version.py           # Python version comparison
+
+# 6. Regenerate this document (both language versions)
 python3 benchmarks/make_report.py
 ```
 
