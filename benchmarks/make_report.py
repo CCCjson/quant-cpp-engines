@@ -33,6 +33,7 @@ pdo = load("experiment_pandas_overhead.json")
 ob = load("orderbook.json")
 parity = load("parity.json")
 py313 = load("backtest_py313.json")
+inc_engine = load("experiment_incremental_engine.json")
 
 
 def r313(bars: int, strategy: str):
@@ -198,6 +199,14 @@ v_ma_ratio_new = (r313(SIZES[-1], "MA_CROSS")["py_pure_engine"]["min"]
 v_macd_ratio_new = (r313(SIZES[-1], "MACD")["py_pure_engine"]["min"]
                     / row(SIZES[-1], "MACD")["cpp_inproc"]["min"])
 
+r3 = inc_engine["results"]
+r3_last = r3[-1]
+r3_rows = [
+    f"| {r['bars']:,} | {ms(r['naive_min'])} | {ms(r['macd_min'])} | **{r['macd_speedup']:.0f}×** | "
+    f"{'✅ 逐位相同' if r['economics_identical'] else '❌ 不一致'} |"
+    for r in r3
+]
+
 NL = "\n"
 
 # ────────────────────────────────────────────────────────────
@@ -228,6 +237,7 @@ doc_zh = f"""# 快慢到底由什么决定 —— 一次从假设到证伪的性
 - [一个不能比的例子](#一个不能比的例子)
 - [订单簿：没有对照组的绝对基线](#订单簿没有对照组的绝对基线)
 - [为了让这些数字可信，做了什么](#为了让这些数字可信做了什么)
+- [第三轮：修复与复测](#第三轮修复与复测)
 - [这次调查查出来的具体问题](#这次调查查出来的具体问题)
 - [复现](#复现)
 
@@ -813,9 +823,10 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 
 按价值排序，都是可执行的：
 
-1. **`strategy_context.h` 的 `macd()` / `rsi()` / `kdj()` 改成增量递推。**
-   实测在两万五千根上能带来 **{incr_last['speedup']:.0f}×**，且把复杂度从 O(N²) 降到 O(N)。
-   增量版的参考实现就在 [`bench_backtest.cpp`](bench_backtest.cpp) 里，已验证逐位等价。
+1. ~~**`strategy_context.h` 的 `macd()` / `rsi()` / `kdj()` 改成增量递推。**~~
+   ✅ **已完成。** 25,000 根上实测 **{r3_last['macd_speedup']:.0f}×**，复杂度 O(N²) → O(N)，
+   四个策略收敛到同一量级。逐位等价由金标准 fixture 守着（全量重算与增量两条路径
+   都要逐位命中），parity 门禁七项仍全部 0.00e+00。详见上面「第三轮：修复与复测」。
 
 2. ~~**`limit_order_book.cpp` 的 `cancel_order` 加 `order_id` 索引。**~~
    ✅ **已完成。** 撤单摊销耗时从 {cancel_before['amortized_ns']:,.0f} ns 降到
@@ -838,6 +849,68 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
    pandas `ewm(adjust=False)` 用第一个值做种。导致首次穿越阈值的 bar 不同，
    最终净值出现稳定的 0.8% 系统性偏差（各规模一致，非累积误差）。
    两种都是常见做法，但**应当明确选定一种并写进文档**。
+
+---
+
+## 第三轮：修复与复测
+
+前两轮查清了原因，这一轮把它修掉，然后复测。
+
+`strategy_context.h` 里的 `macd()` / `rsi()` / `kdj()` 已经改成增量递推：
+持久化递推载体，每根 bar 只推一步。状态挂在**每个标的**的 `SymbolState` 上 ——
+不能放策略对象，因为组合回测下所有标的共用同一个策略实例；也不能放
+`StrategyContext`，因为它每根 bar 在栈上重建。
+
+### 对照臂是冻结的，不是回忆的
+
+改完之后有个直接问题：引擎里的 `MACD` 变快了，那 `MACD` vs `MACD_INCREMENTAL`
+就成了在比较两个相同的东西，这个实验再也无法复现。
+
+所以改动前那份 O(N²) 实现被**原样冻结**进 [`bench_backtest.cpp`](bench_backtest.cpp)，
+作为 `MACD_NAIVE` 对照臂。下表的「改动前」一列是这条臂**当场跑出来的**，不是从旧记录里抄的。
+
+| 数据规模 | 改动前 O(N²) | 引擎当前 O(N) | 提速 | 经济结果 |
+|---|---|---|---|---|
+{NL.join(r3_rows)}
+
+提速比随规模**单调增长**（{r3[0]['macd_speedup']:.0f}× → {r3_last['macd_speedup']:.0f}×）——
+这正是 O(N²)→O(N) 的指纹，与第二轮用原型测出来的形状一致。
+
+**「经济结果」那一列是这张表的前提。** 每一格都比对了成交笔数与最终净值：
+两条臂必须逐位相同，否则它们跑的不是同一个策略，提速数字毫无意义。
+这一列若出现 ❌，生成脚本会直接以非零退出码失败。
+
+### 最有说服力的一行：四个策略收敛到同一量级
+
+25,000 根 bar 上，四个策略现在的耗时：
+
+| 策略 | 耗时 |
+|---|---|
+| `MA_CROSS`（未改动，参照系） | {ms(r3_last['ma_cross_min'])} ms |
+| `MACD` | {ms(r3_last['macd_min'])} ms |
+| `RSI` | {ms(r3_last['rsi_min'])} ms |
+| `KDJ` | {ms(r3_last['kdj_min'])} ms |
+
+第一轮里 `MACD` 比 `MA_CROSS` 慢两个数量级，现在它们**基本相同**。
+`MA_CROSS` 本身没有改动、耗时也没变 —— 它是这次比较的定盘星。
+
+这就把第一轮那个反常现象彻底解释掉了：`MACD` 当初输给 Python，
+与语言无关，与那三个策略的**实现方式**有关。
+
+### 逐位等价是怎么保证的
+
+不是靠「跑出来差不多」，是靠三层：
+
+1. **金标准 fixture**（`backtest_engine/tests/data/indicator_golden.json`）在**改动之前**
+   从朴素实现导出，逐根 bar 记录每个指标的 double **位模式**（不是十进制）。
+   增量重写后，同一份 fixture 必须逐位命中 —— 全量重算路径和增量路径**都要**命中。
+2. **`-ffp-contract=off`**：禁止编译器把 `a*b+c` 收缩成一条 FMA。实测同一份源码
+   默认会编出 3 条 `fmadd`，而 FMA 少一次舍入、差 1 ULP。不关掉的话两条路径可能
+   拿到不同的收缩决策，逐位等价就无从谈起。
+3. **parity 门禁**：C++ 与 Python 参照引擎的七项经济指标仍然全部 `0.00e+00`。
+
+原始数据：[`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json)，
+由 [`exp_incremental_engine.py`](exp_incremental_engine.py) 生成。
 
 ---
 

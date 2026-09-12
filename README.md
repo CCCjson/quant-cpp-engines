@@ -118,7 +118,7 @@ python3 benchmarks/parity_gate.py     # exit 0 = all seven metrics at 0.00e+00
 
 | | |
 |---|---|
-| Unit tests | 148 GoogleTest cases (92 backtest + 56 order book), zero disabled |
+| Unit tests | 154 GoogleTest cases (98 backtest + 56 order book), zero disabled |
 | Compiler warnings | `-Wall -Wextra -Werror` on both engines, zero warnings |
 | Floating point | `-ffp-contract=off` — the FP operation sequence is pinned by the source, not by the compiler's FMA decisions |
 | Sanitizers | Full suite green under ASan + UBSan (`-fno-sanitize-recover=all`) and under ThreadSanitizer |

@@ -57,6 +57,18 @@ namespace {
 struct SymbolState {
     std::vector<Bar> history;                       // 到今天为止的全部 bar（策略算指标用）
     std::unordered_map<std::string, size_t> index;  // date → bars 下标
+
+    /*
+     * 增量指标的递推状态。
+     *
+     * 放在**每个标的**这里，而不是策略对象上 —— 组合回测下所有标的共用同一个
+     * 策略实例（见上面 set_strategy 的警告），跨 bar 状态放策略里会串味。
+     * 也不能放 StrategyContext：它每个 (日期,标的) 在栈上重建，放进去每根就没了。
+     *
+     * 生命周期与这次 run() 相同；std::map 不会让已存在元素的引用失效，
+     * 所以 &st.indicators 在整场回测里是稳定的。
+     */
+    IndicatorState indicators;
 };
 
 }  // namespace
@@ -389,6 +401,7 @@ BacktestResult BacktestEngine::run(const std::string& start_date,
             ctx.bar_index = static_cast<int>(st.history.size()) - 1;
             ctx.current_bar = bar;
             ctx.history = &st.history;
+            ctx.indicators = &st.indicators;   // 增量指标状态（每标的一份）
             // ⭐ 每个标的看到的是**当下的共享现金余额**，前面标的花掉的钱这里就没了
             ctx.cash = portfolio.get_cash();
             ctx.position_quantity = portfolio.get_position_quantity(sym);

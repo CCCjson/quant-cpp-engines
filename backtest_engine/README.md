@@ -5,7 +5,7 @@ server (default `:8002`).
 
 *[中文版 / Chinese version](README.zh-CN.md)*
 
-**~7.4k lines of C++ · 10 built-in strategies · 92 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
+**~7.4k lines of C++ · 10 built-in strategies · 98 GoogleTest cases green · `-Wall -Wextra -Werror` clean**
 
 ---
 
@@ -285,7 +285,7 @@ as 100 shares.
 ## Testing
 
 ```bash
-./build/backtest_tests                                        # 92 cases
+./build/backtest_tests                                        # 98 cases
 ./build/backtest_tests --gtest_filter='GoldenIndicator*'      # indicator golden fixture
 ```
 

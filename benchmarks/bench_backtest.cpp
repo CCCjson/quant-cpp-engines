@@ -41,6 +41,81 @@ using namespace backtest;
 
 namespace {
 
+
+/*
+ * ============================================================
+ * MACD_NAIVE —— 冻结在这里的「改动前」对照臂
+ * ============================================================
+ *
+ * 引擎里的 StrategyContext::macd() 已经改成增量递推了（O(N) 每场回测）。
+ * 如果不把改动前那份 O(N²) 的实现留下来，benchmarks/README 里
+ * 「O(N²) → O(N) 提速 287×」这个结论就**再也无法从仓库复现** ——
+ * 因为 MACD 与 MACD_INCREMENTAL 会变成同一个东西。
+ *
+ * 所以把改动前的实现原样冻结在这里，作为 benchmark 内的对照臂。
+ * NoAllocMACDStrategy 本来就是这种形态的先例。
+ *
+ * ⚠️ 这份代码是**历史快照**，不要跟着引擎一起「优化」——
+ * 它的全部价值就在于它保持着改动前的样子。
+ */
+class NaiveMACDStrategy : public IStrategy {
+public:
+    NaiveMACDStrategy(int fast, int slow, int signal, double position_pct)
+        : fast_(fast), slow_(slow), signal_(signal), position_pct_(position_pct) {}
+
+    std::string name() const override { return "MACD_NAIVE"; }
+    std::string description() const override {
+        return "改动前的 O(N^2) MACD（每根 bar 从第 0 根重算整条序列），作为对照臂冻结";
+    }
+    std::map<std::string, std::string> param_schema() const override { return {}; }
+
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        const auto& hist = *ctx.history;
+        const int n = static_cast<int>(hist.size());
+        // 与真实 MACDStrategy 完全相同的守卫（macd_strategy.cpp:38）——
+        // 一开始我写成了 `n < slow_`，结果这条对照臂产出 1531 笔而引擎产出 1529 笔，
+        // 说明它不是改动前实现的忠实快照。对照臂只要有一丝不同就失去意义。
+        if (ctx.bar_index < slow_ + signal_) return orders;
+        if (n < slow_) return orders;
+
+        // ── 改动前的原样实现：每根 bar 重建 5 个长度 N 的 vector ──
+        std::vector<double> closes(n);
+        for (int i = 0; i < n; ++i) closes[i] = hist[i].close;
+        std::vector<double> dif_series(n, 0.0);
+        const double af = 2.0 / (fast_ + 1);
+        const double as = 2.0 / (slow_ + 1);
+        std::vector<double> ef(n, 0.0); ef[0] = closes[0];
+        for (int i = 1; i < n; ++i) ef[i] = af * closes[i] + (1.0 - af) * ef[i - 1];
+        std::vector<double> es(n, 0.0); es[0] = closes[0];
+        for (int i = 1; i < n; ++i) es[i] = as * closes[i] + (1.0 - as) * es[i - 1];
+        for (int i = 0; i < n; ++i) dif_series[i] = ef[i] - es[i];
+        const double asig = 2.0 / (signal_ + 1);
+        std::vector<double> dea_series(n, 0.0); dea_series[0] = dif_series[0];
+        for (int i = 1; i < n; ++i)
+            dea_series[i] = asig * dif_series[i] + (1.0 - asig) * dea_series[i - 1];
+        const double dif = dif_series[n - 1], dea = dea_series[n - 1];
+
+        if (!initialized_) { prev_dif_ = dif; prev_dea_ = dea; initialized_ = true; return orders; }
+        const bool golden = (prev_dif_ <= prev_dea_) && (dif > dea);
+        const bool death  = (prev_dif_ >= prev_dea_) && (dif < dea);
+        if (golden && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * position_pct_ / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (death && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_dif_ = dif; prev_dea_ = dea;
+        return orders;
+    }
+
+private:
+    int fast_, slow_, signal_;
+    double position_pct_;
+    double prev_dif_ = 0.0, prev_dea_ = 0.0;
+    bool initialized_ = false;
+};
+
 /*
  * ============================================================
  *  对照实验：MACD 的 O(1) 增量版
@@ -217,6 +292,7 @@ std::unique_ptr<IStrategy> make_strategy(const std::string& name) {
     if (name == "MACD")     return std::make_unique<MACDStrategy>(12, 26, 9, 0.95);
     if (name == "RSI")      return std::make_unique<RSIStrategy>(14, 30.0, 70.0, 0.95);
     if (name == "KDJ")      return std::make_unique<KDJStrategy>(9, 3, 3, 20.0, 80.0, 0.95);
+    if (name == "MACD_NAIVE")       return std::make_unique<NaiveMACDStrategy>(12, 26, 9, 0.95);
     if (name == "MACD_INCREMENTAL") return std::make_unique<IncrementalMACDStrategy>(12, 26, 9, 0.95);
     if (name == "MACD_NOALLOC")     return std::make_unique<NoAllocMACDStrategy>(12, 26, 9, 0.95);
     return nullptr;
@@ -252,7 +328,7 @@ double run_once(const std::vector<Bar>& bars, const std::string& strategy_name,
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "用法: " << argv[0] << " <bars.json> <STRATEGY> [warmup] [runs]\n";
-        std::cerr << "策略: MA_CROSS | MACD | RSI | KDJ | MACD_INCREMENTAL\n";
+        std::cerr << "策略: MA_CROSS | MACD | RSI | KDJ | MACD_NAIVE | MACD_INCREMENTAL | MACD_NOALLOC\n";
         return 1;
     }
 

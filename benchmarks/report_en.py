@@ -28,6 +28,15 @@ def build_en(g: dict) -> str:
     # 双花括号是转义，结果会原样输出 "{n:,} bars"（踩过）。
     size_hdr = " | ".join(f"{n:,} bars" for n in g["SIZES"])
 
+    # 第三轮表格行（英文版单独构造，避免与中文版共用「逐位相同」这类字样）
+    r3_rows_en = [
+        "| {b:,} | {a} | {c} | **{sp:.0f}×** | {ok} |".format(
+            b=r["bars"], a=g["ms"](r["naive_min"]), c=g["ms"](r["macd_min"]),
+            sp=r["macd_speedup"],
+            ok="✅ bit-identical" if r["economics_identical"] else "❌ differs")
+        for r in g["r3"]
+    ]
+
     return f"""# What actually decides fast and slow — an investigation that falsified its own premise
 
 This is not a "C++ vs Python" scoreboard.
@@ -54,6 +63,7 @@ Every number can be traced to a file in [`results/`](results/) — this README i
 - [An example that must not be compared](#an-example-that-must-not-be-compared)
 - [The order book: an absolute baseline with no control group](#the-order-book-an-absolute-baseline-with-no-control-group)
 - [What was done to make these numbers trustworthy](#what-was-done-to-make-these-numbers-trustworthy)
+- [Round three: fixed, then re-measured](#round-three-fixed-then-re-measured)
 - [Concrete defects this investigation found](#concrete-defects-this-investigation-found)
 - [Reproducing](#reproducing)
 
@@ -714,11 +724,11 @@ capital at any size. The reasoning is recorded in [`benchlib.py`](benchlib.py)'s
 
 Ordered by value, all actionable:
 
-1. **Make `macd()` / `rsi()` / `kdj()` in `strategy_context.h` incremental.**
-   Measured at {incr_last['speedup']:.0f}× on 25,000 bars, and takes complexity from O(N²) to
-   O(N). A reference implementation for MACD is in
-   [`bench_backtest.cpp`](bench_backtest.cpp), verified bit-identical. RSI and KDJ have no
-   prototype yet and would be written from scratch.
+1. ~~**Make `macd()` / `rsi()` / `kdj()` in `strategy_context.h` incremental.**~~
+   ✅ **Done.** Measured at **{r3_last['macd_speedup']:.0f}×** on 25,000 bars, complexity O(N²) → O(N),
+   and all four strategies converge to the same magnitude. Bit-exactness is guarded by the golden
+   fixture (both the full-recompute and incremental paths must hit it), and the parity gate's
+   seven metrics remain at 0.00e+00. See "Round three" above.
 
 2. ~~**Add an `order_id` index to `cancel_order` in `limit_order_book.cpp`.**~~
    ✅ **Done.** Amortized cancel went from {cancel_before['amortized_ns']:,.0f} ns to
@@ -747,6 +757,75 @@ Ordered by value, all actionable:
    bar first crosses the threshold, producing a stable 0.8% systematic difference in final
    equity (consistent across sizes, so not accumulating error). Both are common conventions,
    but **one should be chosen explicitly and documented.**
+
+---
+
+## Round three: fixed, then re-measured
+
+The first two rounds identified the cause. This round fixes it and measures again.
+
+`macd()` / `rsi()` / `kdj()` in `strategy_context.h` are now incremental recurrences: the
+carriers persist, and each bar advances one step. The state lives on **each symbol's**
+`SymbolState` — it cannot live on the strategy object, because a portfolio backtest shares one
+strategy instance across all symbols, and it cannot live on `StrategyContext`, which is rebuilt
+on the stack every bar.
+
+### The control arm is frozen, not remembered
+
+Fixing this creates an immediate problem: once the engine's `MACD` is fast, `MACD` vs
+`MACD_INCREMENTAL` compares two identical things and the experiment can never be reproduced
+again.
+
+So the pre-fix O(N²) implementation was **frozen verbatim** into
+[`bench_backtest.cpp`](bench_backtest.cpp) as the `MACD_NAIVE` arm. The "before" column below is
+that arm **measured now**, not copied from an old record.
+
+| Bars | Before, O(N²) | Engine now, O(N) | Speedup | Economics |
+|---|---|---|---|---|
+{NL.join(r3_rows_en)}
+
+The speedup grows **monotonically** ({r3[0]['macd_speedup']:.0f}× → {r3_last['macd_speedup']:.0f}×) —
+the fingerprint of O(N²)→O(N), matching the shape round two measured with a prototype.
+
+**The "Economics" column is the precondition for the whole table.** Every cell compares trade
+count and final equity: the two arms must be bit-identical, or they are not running the same
+strategy and the speedup means nothing. If any cell were ❌, the generator exits non-zero.
+
+### The most convincing line: four strategies converge
+
+At 25,000 bars, the four strategies now cost:
+
+| Strategy | Time |
+|---|---|
+| `MA_CROSS` (unchanged, the control) | {ms(r3_last['ma_cross_min'])} ms |
+| `MACD` | {ms(r3_last['macd_min'])} ms |
+| `RSI` | {ms(r3_last['rsi_min'])} ms |
+| `KDJ` | {ms(r3_last['kdj_min'])} ms |
+
+In round one `MACD` was two orders of magnitude slower than `MA_CROSS`; now they are
+essentially the same. `MA_CROSS` was not modified and its timing did not move — it is the fixed
+point of this comparison.
+
+That closes out round one's anomaly completely: `MACD` lost to Python because of how those three
+indicators were *implemented*, not because of the language.
+
+### How bit-exactness is actually guaranteed
+
+Not by "the numbers came out close." By three layers:
+
+1. **A golden fixture** (`backtest_engine/tests/data/indicator_golden.json`) captured from the
+   naive implementations **before** the rewrite, recording every indicator on every bar as the
+   double's **bit pattern**, not a decimal. After the rewrite the same fixture must be hit
+   bit-for-bit — by **both** the full-recompute path and the incremental path.
+2. **`-ffp-contract=off`**: the compiler may not contract `a*b+c` into an FMA. Measured, the
+   same source otherwise emits 3 `fmadd` instructions, and an FMA rounds once instead of twice —
+   a 1 ULP difference. Without this, the two paths could get different contraction decisions and
+   bit-exactness would be meaningless.
+3. **The parity gate**: all seven economic metrics against the Python reference are still
+   `0.00e+00`.
+
+Raw data: [`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json),
+produced by [`exp_incremental_engine.py`](exp_incremental_engine.py).
 
 ---
 

@@ -166,13 +166,27 @@ std::vector<Bar> real_series() {
  * （engine.cpp:354-374 先 push_back 今天的 bar 再构造 context）。
  * 指标种子取自 history[0]，所以数值依赖回测起点——这个性质也被一起钉住。
  */
-void check_series(const std::string& key, const std::vector<Bar>& bars) {
+/*
+ * mode = Naive       —— ctx.indicators 为空，走全量重算的回退路径
+ * mode = Incremental —— 挂上 IndicatorState，走增量递推路径
+ *
+ * **两条路径都必须逐位命中同一份金标准。** 这正是「增量重写逐位等价」这句话
+ * 的全部内容：fixture 是在改动之前从朴素实现导出的，如果增量版有一位不同，
+ * 下面就会红。
+ */
+enum class Mode { Naive, Incremental };
+
+void check_series(const std::string& key, const std::vector<Bar>& bars,
+                  Mode mode = Mode::Naive) {
     const json& rows = golden().at("series").at(key);
     ASSERT_EQ(rows.size(), bars.size())
         << key << ": fixture 的 bar 数与序列长度不符，fixture 可能过期了";
 
     std::vector<Bar> history;
     history.reserve(bars.size());
+
+    // 增量模式下，这份状态要跨 bar 存活（模拟引擎里挂在 SymbolState 上的那份）
+    IndicatorState istate;
 
     for (size_t i = 0; i < bars.size(); ++i) {
         history.push_back(bars[i]);
@@ -182,6 +196,7 @@ void check_series(const std::string& key, const std::vector<Bar>& bars) {
         ctx.bar_index = static_cast<int>(i);
         ctx.current_bar = bars[i];
         ctx.history = &history;
+        if (mode == Mode::Incremental) ctx.indicators = &istate;
 
         const json& g = rows[i];
         ASSERT_EQ(g.at("i").get<size_t>(), i) << key << ": fixture 行序错位";
@@ -216,7 +231,14 @@ void check_series(const std::string& key, const std::vector<Bar>& bars) {
 
 // ── 真实日线：180 根，与 parity 门禁用的是同一份 fixture ──
 TEST(GoldenIndicatorTest, RealBars180) {
-    check_series("real_180", real_series());
+    check_series("real_180", real_series(), Mode::Naive);
+}
+
+// ── 同一份金标准，走增量路径 ──
+// 这几个用例才是「增量重写逐位等价」的真正证明。上面那组走的是全量重算回退路径，
+// 只能说明 fixture 本身没坏。
+TEST(GoldenIndicatorTest, RealBars180_Incremental) {
+    check_series("real_180", real_series(), Mode::Incremental);
 }
 
 /*
@@ -227,17 +249,29 @@ TEST(GoldenIndicatorTest, RealBars180) {
  * 「改进」都会让这个用例变红——这正是想要的效果，因为那会改变回测结果。
  */
 TEST(GoldenIndicatorTest, FlatSeriesHitsKdjEqualHighLowBranch) {
-    check_series("flat_60", flat_series());
+    check_series("flat_60", flat_series(), Mode::Naive);
+}
+
+TEST(GoldenIndicatorTest, FlatSeriesHitsKdjEqualHighLowBranch_Incremental) {
+    check_series("flat_60", flat_series(), Mode::Incremental);
 }
 
 // rising：单调上涨，逼出 rsi() 的 `avg_loss == 0.0 → return 100.0`（:316）
 TEST(GoldenIndicatorTest, RisingSeriesHitsRsiZeroLossBranch) {
-    check_series("rising_60", rising_series());
+    check_series("rising_60", rising_series(), Mode::Naive);
+}
+
+TEST(GoldenIndicatorTest, RisingSeriesHitsRsiZeroLossBranch_Incremental) {
+    check_series("rising_60", rising_series(), Mode::Incremental);
 }
 
 // falling：单调下跌，逼出 avg_gain 为 0 的另一侧
 TEST(GoldenIndicatorTest, FallingSeriesHitsRsiZeroGainBranch) {
-    check_series("falling_60", falling_series());
+    check_series("falling_60", falling_series(), Mode::Naive);
+}
+
+TEST(GoldenIndicatorTest, FallingSeriesHitsRsiZeroGainBranch_Incremental) {
+    check_series("falling_60", falling_series(), Mode::Incremental);
 }
 
 /*
@@ -271,4 +305,102 @@ TEST(GoldenIndicatorTest, FixtureActuallyCoversTheInterestingBranches) {
         << "rising 序列应命中 rsi 的 avg_loss==0 分支";
     EXPECT_EQ(as_double(from_hex(s.at("falling_60")[30].at("rsi14"))), 0.0)
         << "falling 序列应命中 rsi 的 avg_gain==0 一侧";
+}
+
+/*
+ * ── 同一根 bar 上重复读取必须幂等 ──
+ *
+ * 朴素实现是**纯函数**：同一根 bar 调用两次得到同样的值。而 ComboStrategy 会把
+ * context 按值复制两份、对每个子策略**每根 bar 调用两次**（combo_strategy.cpp），
+ * 所以增量版必须保持这个性质。
+ *
+ * 说明一下这个用例实际验证了什么、以及没验证什么（实测确认过）：
+ *
+ * 「重复调用导致递推被多推一次」在当前设计下**结构上不可能发生** ——
+ * 步进的条件是 `valid_size == n - 1` 且上一根 bar 指纹吻合，二者**恰好**成立才步进；
+ * 同一根 bar 上的第二次调用 valid_size 已经等于 n，落不进步进分支，
+ * 而是走全量重建，得到同样正确的值。
+ * 我把 `valid_size == n` 那个短路临时删掉验证过：这个用例仍然通过。
+ *
+ * 也就是说那个短路是**性能优化，不是正确性保证** —— 没有它，
+ * ComboStrategy 的第二次调用会退化成 O(N) 重建，正确但慢。
+ *
+ * 所以这个用例真正钉住的是：**重复读取返回逐位相同的值，且该值仍然是这根 bar 的
+ * 金标准值**（没有被推到下一根去）。若将来有人把步进条件改宽（比如写成
+ * `valid_size >= n - 1`），它会立刻变红。
+ *
+ * 顺带覆盖了另一件事：多个不同参数的指标共存于同一份 IndicatorState
+ * （slot_for 按 (kind, 参数) 分槽），互不干扰。
+ */
+TEST(GoldenIndicatorTest, RepeatedReadsWithinOneBarAreIdempotent) {
+    const std::vector<Bar> bars = real_series();
+    const json& rows = golden().at("series").at("real_180");
+    ASSERT_EQ(rows.size(), bars.size());
+
+    std::vector<Bar> history;
+    history.reserve(bars.size());
+    IndicatorState istate;
+
+    for (size_t i = 0; i < bars.size(); ++i) {
+        history.push_back(bars[i]);
+
+        StrategyContext ctx;
+        ctx.symbol = "IDEMPOTENT";
+        ctx.bar_index = static_cast<int>(i);
+        ctx.current_bar = bars[i];
+        ctx.history = &history;
+        ctx.indicators = &istate;
+
+        // 每根 bar 连读三次，模拟 ComboStrategy 的重复调用
+        const auto m1 = ctx.macd(12, 26, 9);
+        const auto m2 = ctx.macd(12, 26, 9);
+        const auto m3 = ctx.macd(12, 26, 9);
+        const double r1 = ctx.rsi(14), r2 = ctx.rsi(14);
+        const auto k1 = ctx.kdj(9, 3, 3), k2 = ctx.kdj(9, 3, 3);
+
+        const std::string tag = "bar#" + std::to_string(i) + " ";
+        EXPECT_EQ(bits(m1.dif), bits(m2.dif)) << tag << "第二次读 macd.dif 变了 —— 递推被多推了一次";
+        EXPECT_EQ(bits(m2.dif), bits(m3.dif)) << tag << "第三次读 macd.dif 又变了";
+        EXPECT_EQ(bits(m1.dea), bits(m3.dea)) << tag << "重复读 macd.dea 不幂等";
+        EXPECT_EQ(bits(r1), bits(r2)) << tag << "重复读 rsi 不幂等";
+        EXPECT_EQ(bits(k1.k), bits(k2.k)) << tag << "重复读 kdj.k 不幂等";
+        EXPECT_EQ(bits(k1.d), bits(k2.d)) << tag << "重复读 kdj.d 不幂等";
+
+        // 而且重复读之后，值仍然与金标准一致（没有被推到下一根去）
+        const json& g = rows[i];
+        EXPECT_BITWISE_EQ(m3.dif, from_hex(g.at("macd_dif")), tag + "重复读之后 macd.dif");
+        EXPECT_BITWISE_EQ(r2, from_hex(g.at("rsi14")), tag + "重复读之后 rsi");
+        EXPECT_BITWISE_EQ(k2.k, from_hex(g.at("kdj_k")), tag + "重复读之后 kdj.k");
+    }
+}
+
+/*
+ * ── 不同参数各占一个槽，互不干扰 ──
+ * 同一根 bar 上交替读两组参数的 MACD，各自都必须与自己那组的全量重算一致。
+ */
+TEST(GoldenIndicatorTest, DifferentParameterSetsDoNotShareState) {
+    const std::vector<Bar> bars = real_series();
+    std::vector<Bar> history;
+    IndicatorState istate;
+
+    for (size_t i = 0; i < bars.size(); ++i) {
+        history.push_back(bars[i]);
+
+        StrategyContext inc;
+        inc.history = &history; inc.current_bar = bars[i];
+        inc.bar_index = static_cast<int>(i); inc.indicators = &istate;
+
+        StrategyContext naive;              // 无 indicators → 全量重算
+        naive.history = &history; naive.current_bar = bars[i];
+        naive.bar_index = static_cast<int>(i);
+
+        // 交替读两组参数，逼两个 slot 交错更新
+        const auto a_inc = inc.macd(12, 26, 9);
+        const auto b_inc = inc.macd(5, 35, 5);
+        const auto a_ref = naive.macd(12, 26, 9);
+        const auto b_ref = naive.macd(5, 35, 5);
+
+        EXPECT_EQ(bits(a_inc.dif), bits(a_ref.dif)) << "bar#" << i << " (12,26,9) 组被串了";
+        EXPECT_EQ(bits(b_inc.dif), bits(b_ref.dif)) << "bar#" << i << " (5,35,5) 组被串了";
+    }
 }
