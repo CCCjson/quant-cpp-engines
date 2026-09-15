@@ -1067,6 +1067,35 @@ across sessions.**
 > **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
 > this machine was doing today, the slope measures the order of the algorithm.
 
+### Scoreboard: 11 predictions, 9 right, 1 wrong
+
+{prereg_scoreboard('en')}
+
+**The one that was wrong is worth more than the nine that were right.**
+
+P5 predicted `MOMENTUM`'s slope would land in 1.00–1.05, on the reasoning that `returns()` is
+O(1), so a whole backtest is strictly O(N). Measured: **{fit['C++/MOMENTUM']:.4f}** — above the
+bound.
+
+Where the reasoning broke: it assumed the *engine* contributes a slope of 1.00. In fact all six
+C++ strategies land in **1.045–1.078**, and they do so **independently of indicator cost** —
+`MA_CROSS` does 25 additions per bar and fits {fit['C++/MA_CROSS']:.4f}, *lower* than
+`MOMENTUM`, whose indicator costs nothing at all.
+
+So ~1.05–1.08 is a floor belonging to **the engine**, not to the indicators. Python sits at
+0.995–1.007 over the same sizes and has no such floor — the difference being that on the C++
+side the per-bar memory footprint grows with N (history and the equity curve both lengthen) and
+cache behaviour degrades with it. That attribution has **not been confirmed by a controlled
+experiment**, so it is offered as a hypothesis and nothing more.
+
+The miss corrects something larger than itself: **"the C++ engine is O(N)" is, on this machine,
+precisely k ≈ 1.05–1.08 rather than 1.00.** Earlier rounds read 1.06 as "linear, good enough"
+and nobody asked where the 0.06 came from.
+
+One more entry counts as a hit but exposed a flaw in the pre-registration itself — see P7 below:
+it pinned its tolerance to a baseline from another day, and only a paired measurement could
+settle it.
+
 ### The gate was not guarding the code that changed
 
 For a long time this parity gate ran only `MA_CROSS` — and `MA_CROSS` uses nothing but
@@ -1145,6 +1174,8 @@ python3 benchmarks/bench.py                      # main table (investigation-tim
 # 5. Controlled experiments (every result file has a generator)
 python3 benchmarks/exp_cpp_experiments.py        # complexity fit / incremental / allocation
 python3 benchmarks/exp_incremental_engine.py     # round three: post-fix re-measurement
+python3 benchmarks/exp_indicator_profile.py      # round four: indicator share (paired)
+python3 benchmarks/exp_machine_drift.py          # round four: cross-session drift + baseline
 python3 benchmarks/exp_pandas_overhead.py        # H5 data structures
 python3 benchmarks/bench_py_version.py           # Python version comparison
 

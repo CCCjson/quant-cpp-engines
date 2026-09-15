@@ -94,6 +94,26 @@ def drift_table(lang="zh"):
 
 
 # 剖析里能测出来的最大占比 —— 现算，不写死
+def prereg_scoreboard(lang="zh"):
+    """记分牌：命中 / 落空 / 不适用 各多少。现算，不写死。"""
+    scored = [p for p in prereg["predictions"] if p.get("measured")]
+    hit = sum(1 for p in scored if p["measured"]["verdict"].startswith("✅"))
+    miss = sum(1 for p in scored if p["measured"]["verdict"].startswith("❌"))
+    na = len(scored) - hit - miss
+    total = len(prereg["predictions"])
+    if lang == "zh":
+        return (f"| 判定 | 条数 |\n|---|---|\n"
+                f"| ✅ 命中 | {hit} |\n"
+                f"| ❌ 落空 | {miss} |\n"
+                f"| — 不适用（决策规则判定不做） | {na} |\n"
+                f"| **合计** | **{total}** |")
+    return (f"| Verdict | Count |\n|---|---|\n"
+            f"| ✅ hit | {hit} |\n"
+            f"| ❌ missed | {miss} |\n"
+            f"| — not applicable (the decision rule said don't build it) | {na} |\n"
+            f"| **total** | **{total}** |")
+
+
 def gate_table(lang="zh"):
     """门禁覆盖了哪些策略，以及登记在案的分歧。"""
     head = ("| 策略 | 七项经济指标最大差 | 是否进门禁 |\n|---|---|---|" if lang == "zh"
@@ -1220,6 +1240,31 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 > **这正是斜率比倍数更值得信的原因**：倍数量的是这台机器今天的状态，
 > 斜率量的是算法的阶数。
 
+### 记分牌：11 条预测，对了 9 条，错了 1 条
+
+{prereg_scoreboard('zh')}
+
+**错的那条（P5）比对的那 9 条值钱。**
+
+我预测 `MOMENTUM` 的斜率落在 1.00–1.05，理由是「`returns()` 是 O(1)，
+所以整场严格 O(N)」。实测 **{fit['C++/MOMENTUM']:.4f}**，超出上界。
+
+错在哪：我默认了「引擎本身贡献斜率 1.00」。实测六个 C++ 策略全部落在
+**1.045–1.078**，而且**与指标成本无关** —— `MA_CROSS` 每根 bar 做 25 次加法，
+斜率 {fit['C++/MA_CROSS']:.4f}，反而**低于**指标成本为零的 `MOMENTUM`。
+
+也就是说 ~1.05–1.08 是**引擎自身的底**，不是指标带来的。
+Python 侧同期是 0.995–1.007，没有这个底 —— 差别在于 C++ 这一侧每根 bar 的
+内存足迹随 N 增长（history 与净值曲线都在变长），缓存行为随之变差。
+这个归因**没有做对照实验去证实**，所以只写到这里为止，不当结论用。
+
+这条错误顺带纠正了一件更要紧的事：**「C++ 引擎是 O(N)」这句话，
+在这台机器上的精确表述是 k ≈ 1.05–1.08，不是 1.00。**
+之前几轮一直把 1.06 读成「就是线性」，没人追问那 0.06 从哪来。
+
+还有一条虽然算「命中」但暴露了预注册自己的毛病，见下面 P7 那一栏 ——
+它把容差钉在了另一天的基线上，只有换成配对测法才判得了。
+
 ### 门禁本来守的不是被改动的代码
 
 一直以来这道 parity 门禁只跑 `MA_CROSS`，而 `MA_CROSS` 只用 `sma()`。
@@ -1293,6 +1338,8 @@ python3 benchmarks/bench.py                      # 主跑分表（调查当时�
 # 5. 对照实验（每个结果文件都有对应脚本）
 python3 benchmarks/exp_cpp_experiments.py        # 复杂度拟合 / 增量 / 分配
 python3 benchmarks/exp_incremental_engine.py     # 第三轮：修复后复测
+python3 benchmarks/exp_indicator_profile.py      # 第四轮：指标占比剖析（配对法）
+python3 benchmarks/exp_machine_drift.py          # 第四轮：跨会话漂移 + 同场基线
 python3 benchmarks/exp_pandas_overhead.py        # H5 数据结构
 python3 benchmarks/bench_py_version.py           # Python 版本对照
 

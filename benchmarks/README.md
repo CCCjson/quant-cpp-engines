@@ -473,9 +473,9 @@ into pandas scalar indexing (H5) — the classic symptom of a hot path falling b
 interpreter and object layer. Same library, and using it right versus wrong differs by
 314×.
 
-**3. Cost to write and change** — 1,431 lines vs 9,460 lines
+**3. Cost to write and change** — 1,431 lines vs 9,479 lines
 
-What the Python reference engine does in 1,431 lines, the C++ engine takes 9,460
+What the Python reference engine does in 1,431 lines, the C++ engine takes 9,479
 lines to do (the latter does more — risk management, market rules, portfolio backtesting and
 six additional strategies — so this comparison is a rough order-of-magnitude reference, not a
 like-for-like line count).
@@ -786,7 +786,7 @@ capital at any size. The reasoning is recorded in [`benchlib.py`](benchlib.py)'s
 Ordered by value, all actionable:
 
 1. ~~**Make `macd()` / `rsi()` / `kdj()` in `strategy_context.h` incremental.**~~
-   ✅ **Done.** Measured at **251×** on 25,000 bars, complexity O(N²) → O(N),
+   ✅ **Done.** Measured at **240×** on 25,000 bars, complexity O(N²) → O(N),
    and all four strategies converge to the same magnitude. Bit-exactness is guarded by the golden
    fixture (both the full-recompute and incremental paths must hit it), and the parity gate's
    seven metrics remain at 0.00e+00. See "Round three" above.
@@ -843,13 +843,13 @@ that arm **measured now**, not copied from an old record.
 
 | Bars | Before, O(N²) | Engine now, O(N) | Speedup | Economics |
 |---|---|---|---|---|
-| 250 | 0.175 | 0.045 | **4×** | ✅ bit-identical |
-| 1,000 | 2.270 | 0.183 | **12×** | ✅ bit-identical |
-| 2,500 | 14.741 | 0.470 | **31×** | ✅ bit-identical |
-| 10,000 | 238.390 | 2.085 | **114×** | ✅ bit-identical |
-| 25,000 | 1,441.031 | 5.738 | **251×** | ✅ bit-identical |
+| 250 | 0.381 | 0.099 | **4×** | ✅ bit-identical |
+| 1,000 | 2.308 | 0.202 | **11×** | ✅ bit-identical |
+| 2,500 | 14.604 | 0.503 | **29×** | ✅ bit-identical |
+| 10,000 | 240.105 | 2.290 | **105×** | ✅ bit-identical |
+| 25,000 | 1,468.161 | 6.127 | **240×** | ✅ bit-identical |
 
-The speedup grows **monotonically** (4× → 251×) —
+The speedup grows **monotonically** (4× → 240×) —
 the fingerprint of O(N²)→O(N), matching the shape round two measured with a prototype.
 
 **The "Economics" column is the precondition for the whole table.** Every cell compares trade
@@ -862,10 +862,10 @@ At 25,000 bars, the four strategies now cost:
 
 | Strategy | Time |
 |---|---|
-| `MA_CROSS` (unchanged, the control) | 5.541 ms |
-| `MACD` | 5.738 ms |
-| `RSI` | 5.550 ms |
-| `KDJ` | 5.816 ms |
+| `MA_CROSS` (unchanged, the control) | 5.901 ms |
+| `MACD` | 6.127 ms |
+| `RSI` | 5.824 ms |
+| `KDJ` | 6.057 ms |
 
 In round one `MACD` was two orders of magnitude slower than `MA_CROSS`; now they are
 essentially the same. `MA_CROSS` was not modified and its timing did not move — it is the fixed
@@ -961,8 +961,8 @@ Two rows deserve to be called out:
 | **P6** | BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured | ✅ hit BOLLINGER 5.930 ms and MOMENTUM 5.410 ms, both inside 5.0–7.0 ms and the same magnitude as the other four. |
 | **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ✅ hit Judged by pairing: the pre-refactor bench binary was rebuilt (git worktree at 6e11fae) and the two binaries alternated for 15 rounds, swapping order each round. Median paired differences across six strategies land in −0.94%…+1.64%, all inside the predicted ±2%, and every sign test returns p > 0.01 — the difference is not detectable at all. ⚠️ Only the paired method can settle this. With the cross-session comparison flagged in the note, the changed strategies moved +1.7%…+3.8% while the untouched controls moved −0.9%…+2.8% — overlapping bands that say nothing. Same prediction, different comparator, and it goes from unresolvable to a clean hit.<br>⚠️ This prediction was itself malformed: it pinned a ±2% tolerance to a baseline measured on a different day. Re-measuring the *unchanged* code across sessions drifts by 2.9%–6.6% (see results/machine_drift.json) — the noise is larger than the effect. It is therefore judged against a same-session baseline instead; the original wording is left untouched. |
 | **P8** | After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path | ✅ hit The golden indicator fixture is still hit bit for bit by both the full-recompute path and the incremental path; all 11 cases pass. Four reset cases were added, three of them verified against a negative control: dropping `count_` from KdjIndicator::reset() turns them red. |
-| **P9** | The test "run two backtests in one process; the second must equal a standalone run" goes **red** before on_init() is implemented | ⏳ not yet measured |
-| **P10** | The test "two symbols in one engine sharing one strategy instance" also goes **red** before the fix (cross-symbol contamination) | ⏳ not yet measured |
+| **P9** | The test "run two backtests in one process; the second must equal a standalone run" goes **red** before on_init() is implemented | ✅ hit It did go red, and that was re-verified with a negative control. The case was red in the pre-fix commit (e672f0e); after the fix, reverting on_init() to an empty body — the pre-fix state where nobody overrode it — immediately turns ReusedInstanceBehavesLikeAFreshOne and RunningTheSameDataTwiceMatchesASingleRun red while the cross-symbol case stays green, confirming what each case actually guards. ⚠️ Of the five strategies KDJ is **structurally immune** here: k starts at 50 and has taken only two steps by the first evaluated bar, so it necessarily lies in [22.2, 77.8] — out of reach of the k<20 a golden cross needs and the k>80 a death cross needs, whatever the data. |
+| **P10** | The test "two symbols in one engine sharing one strategy instance" also goes **red** before the fix (cross-symbol contamination) | ✅ hit It did go red, for all five strategies. Negative control: reverting the per-`ctx.symbol` slots back to one shared slot immediately turns OneInstanceServingTwoSymbolsDoesNotContaminate red while the two cross-run cases stay green. ⚠️ Fixing it showed that **on_init() alone is not enough**: it runs once per backtest, while symbols are interleaved *within* one backtest, so cross-symbol isolation needs per-symbol slots. That second layer was forced by the test, not foreseen. The engine.cpp comment claiming that all nine strategies recompute from ctx.history and are therefore safe was also false, and has been corrected. |
 | **P11** | Deleting ema() / ema_at() turns no test red | ✅ hit ema() / ema_at() are gone; 106 tests stay green and the parity gate still reports 0.00e+00 across all three gated strategies. They were O(N) per bar — O(N²) over a backtest — with no callers and no tests anywhere in the repo. |
 
 **P2 is not an ordinary prediction — it is a decision rule:**
@@ -1071,6 +1071,40 @@ across sessions.**
 > **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
 > this machine was doing today, the slope measures the order of the algorithm.
 
+### Scoreboard: 11 predictions, 9 right, 1 wrong
+
+| Verdict | Count |
+|---|---|
+| ✅ hit | 9 |
+| ❌ missed | 1 |
+| — not applicable (the decision rule said don't build it) | 1 |
+| **total** | **11** |
+
+**The one that was wrong is worth more than the nine that were right.**
+
+P5 predicted `MOMENTUM`'s slope would land in 1.00–1.05, on the reasoning that `returns()` is
+O(1), so a whole backtest is strictly O(N). Measured: **1.0719** — above the
+bound.
+
+Where the reasoning broke: it assumed the *engine* contributes a slope of 1.00. In fact all six
+C++ strategies land in **1.045–1.078**, and they do so **independently of indicator cost** —
+`MA_CROSS` does 25 additions per bar and fits 1.0513, *lower* than
+`MOMENTUM`, whose indicator costs nothing at all.
+
+So ~1.05–1.08 is a floor belonging to **the engine**, not to the indicators. Python sits at
+0.995–1.007 over the same sizes and has no such floor — the difference being that on the C++
+side the per-bar memory footprint grows with N (history and the equity curve both lengthen) and
+cache behaviour degrades with it. That attribution has **not been confirmed by a controlled
+experiment**, so it is offered as a hypothesis and nothing more.
+
+The miss corrects something larger than itself: **"the C++ engine is O(N)" is, on this machine,
+precisely k ≈ 1.05–1.08 rather than 1.00.** Earlier rounds read 1.06 as "linear, good enough"
+and nobody asked where the 0.06 came from.
+
+One more entry counts as a hit but exposed a flaw in the pre-registration itself — see P7 below:
+it pinned its tolerance to a baseline from another day, and only a paired measurement could
+settle it.
+
 ### The gate was not guarding the code that changed
 
 For a long time this parity gate ran only `MA_CROSS` — and `MA_CROSS` uses nothing but
@@ -1154,6 +1188,8 @@ python3 benchmarks/bench.py                      # main table (investigation-tim
 # 5. Controlled experiments (every result file has a generator)
 python3 benchmarks/exp_cpp_experiments.py        # complexity fit / incremental / allocation
 python3 benchmarks/exp_incremental_engine.py     # round three: post-fix re-measurement
+python3 benchmarks/exp_indicator_profile.py      # round four: indicator share (paired)
+python3 benchmarks/exp_machine_drift.py          # round four: cross-session drift + baseline
 python3 benchmarks/exp_pandas_overhead.py        # H5 data structures
 python3 benchmarks/bench_py_version.py           # Python version comparison
 

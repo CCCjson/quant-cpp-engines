@@ -253,7 +253,12 @@
       "predicted": {
         "test_fails_before_fix": true
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "verdict_en": "✅ hit",
+        "detail": "红过，而且用负向对照复核过。修复前提交（e672f0e）里这个用例就是红的；修完之后把 on_init() 退回空实现（即修复前那种「没人覆写」的状态），ReusedInstanceBehavesLikeAFreshOne 与 RunningTheSameDataTwiceMatchesASingleRun 两个用例立刻变红，而跨标的那个仍绿 —— 说明它们守的确实是跨场这一条。⚠️ 五个策略里 KDJ 是**结构免疫**的：k 从 50 起步，到首个评估 bar 只走两步，必然落在 [22.2, 77.8]，够不着金叉要的 k<20 或死叉要的 k>80。与数据无关。",
+        "detail_en": "It did go red, and that was re-verified with a negative control. The case was red in the pre-fix commit (e672f0e); after the fix, reverting on_init() to an empty body — the pre-fix state where nobody overrode it — immediately turns ReusedInstanceBehavesLikeAFreshOne and RunningTheSameDataTwiceMatchesASingleRun red while the cross-symbol case stays green, confirming what each case actually guards. ⚠️ Of the five strategies KDJ is **structurally immune** here: k starts at 50 and has taken only two steps by the first evaluated bar, so it necessarily lies in [22.2, 77.8] — out of reach of the k<20 a golden cross needs and the k>80 a death cross needs, whatever the data."
+      }
     },
     {
       "id": "P10",
@@ -263,7 +268,12 @@
       "predicted": {
         "test_fails_before_fix": true
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "verdict_en": "✅ hit",
+        "detail": "红过，五个策略全红。负向对照：把状态从按 ctx.symbol 分槽退回全场共用一份，OneInstanceServingTwoSymbolsDoesNotContaminate 立刻变红，而跨场那两个仍绿。⚠️ 修的过程中发现**一个 on_init() 不够**：它每场只调一次，而一场之内多个标的是交替进来的，所以跨标的必须靠分槽解决。这一步是被测试逼出来的，不是一开始就想到的。另外 engine.cpp 那条「现有 9 个策略都是从 ctx.history 现算的，故安全」的注释与代码事实不符，一并改正。",
+        "detail_en": "It did go red, for all five strategies. Negative control: reverting the per-`ctx.symbol` slots back to one shared slot immediately turns OneInstanceServingTwoSymbolsDoesNotContaminate red while the two cross-run cases stay green. ⚠️ Fixing it showed that **on_init() alone is not enough**: it runs once per backtest, while symbols are interleaved *within* one backtest, so cross-symbol isolation needs per-symbol slots. That second layer was forced by the test, not foreseen. The engine.cpp comment claiming that all nine strategies recompute from ctx.history and are therefore safe was also false, and has been corrected."
+      }
     },
     {
       "id": "P11",
