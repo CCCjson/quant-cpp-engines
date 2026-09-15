@@ -197,6 +197,8 @@ StrategyContext context_at(const std::string& symbol, const std::vector<Bar>& hi
  */
 std::string order_stream(IStrategy* s, const std::vector<Bar>& bars,
                          const std::string& symbol = "X") {
+    s->on_init();               // 引擎每场 run() 开头就是这么做的（engine.cpp:139）
+
     std::vector<Bar> hist;
     hist.reserve(bars.size());
     IndicatorState ind;
@@ -291,6 +293,10 @@ TEST(StrategyResetTest, OneInstanceServingTwoSymbolsDoesNotContaminate) {
 
         // 被测：一个实例，A/B 交替 —— 组合回测里就是这样的
         auto shared = c.make();
+        // ⚠️ 一场回测只调一次 on_init()，然后两个标的在这一场里交替 ——
+        //    组合回测就是这个形态。所以 on_init() 单独**解决不了**跨标的串味，
+        //    状态必须按标的分开存。
+        shared->on_init();
         std::vector<Bar> hist_a, hist_b;
         IndicatorState ind_a, ind_b;      // 指标状态本来就是每标的一份
         std::string got_a, got_b;

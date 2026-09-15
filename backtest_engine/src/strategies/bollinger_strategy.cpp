@@ -29,6 +29,10 @@ std::map<std::string, std::string> BollingerStrategy::param_schema() const {
     };
 }
 
+void BollingerStrategy::on_init() {
+    state_.clear();
+}
+
 std::vector<Order> BollingerStrategy::on_bar(const StrategyContext& ctx) {
     std::vector<Order> orders;
 
@@ -38,11 +42,12 @@ std::vector<Order> BollingerStrategy::on_bar(const StrategyContext& ctx) {
 
     auto bb = ctx.bollinger(period_, num_std_);
     double close = ctx.current_bar.close;
+    SymbolState& st = state_[ctx.symbol];
 
     // 价格从下轨下方反弹回来（上穿下轨）
-    bool bounce_from_lower = (prev_close_ <= prev_lower_ && prev_lower_ > 0) && (close > bb.lower);
+    bool bounce_from_lower = (st.prev_close <= st.prev_lower && st.prev_lower > 0) && (close > bb.lower);
     // 价格从上轨上方回落（下穿上轨）
-    bool drop_from_upper = (prev_close_ >= prev_upper_ && prev_upper_ > 0) && (close < bb.upper);
+    bool drop_from_upper = (st.prev_close >= st.prev_upper && st.prev_upper > 0) && (close < bb.upper);
 
     if (bounce_from_lower && !ctx.has_position()) {
         double available = ctx.cash * position_pct_;
@@ -56,9 +61,9 @@ std::vector<Order> BollingerStrategy::on_bar(const StrategyContext& ctx) {
         orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
     }
 
-    prev_close_ = close;
-    prev_lower_ = bb.lower;
-    prev_upper_ = bb.upper;
+    st.prev_close = close;
+    st.prev_lower = bb.lower;
+    st.prev_upper = bb.upper;
 
     return orders;
 }

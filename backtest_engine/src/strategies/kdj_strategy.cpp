@@ -35,6 +35,10 @@ std::map<std::string, std::string> KDJStrategy::param_schema() const {
     };
 }
 
+void KDJStrategy::on_init() {
+    state_.clear();
+}
+
 std::vector<Order> KDJStrategy::on_bar(const StrategyContext& ctx) {
     std::vector<Order> orders;
 
@@ -54,10 +58,12 @@ std::vector<Order> KDJStrategy::on_bar(const StrategyContext& ctx) {
      *
      * MACDStrategy 本来就有这个守卫（macd_strategy.cpp:44-49），KDJ 漏了。
      */
-    if (!initialized_) {
-        prev_k_ = result.k;
-        prev_d_ = result.d;
-        initialized_ = true;
+    SymbolState& st = state_[ctx.symbol];
+
+    if (!st.initialized) {
+        st.prev_k = result.k;
+        st.prev_d = result.d;
+        st.initialized = true;
         return orders;
     }
 
@@ -76,9 +82,9 @@ std::vector<Order> KDJStrategy::on_bar(const StrategyContext& ctx) {
      *     低位（超卖区）金叉才买，高位（超买区）死叉才卖。
      */
     // K 上穿 D，且在低位区域（超卖区）
-    bool golden_cross = (prev_k_ <= prev_d_) && (result.k > result.d) && (result.k < oversold_);
+    bool golden_cross = (st.prev_k <= st.prev_d) && (result.k > result.d) && (result.k < oversold_);
     // K 下穿 D，且在高位区域（超买区）
-    bool death_cross = (prev_k_ >= prev_d_) && (result.k < result.d) && (result.k > overbought_);
+    bool death_cross = (st.prev_k >= st.prev_d) && (result.k < result.d) && (result.k > overbought_);
 
     if (golden_cross && !ctx.has_position()) {
         double available = ctx.cash * position_pct_;
@@ -92,8 +98,8 @@ std::vector<Order> KDJStrategy::on_bar(const StrategyContext& ctx) {
         orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
     }
 
-    prev_k_ = result.k;
-    prev_d_ = result.d;
+    st.prev_k = result.k;
+    st.prev_d = result.d;
 
     return orders;
 }

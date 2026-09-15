@@ -32,6 +32,10 @@ std::map<std::string, std::string> RSIStrategy::param_schema() const {
     };
 }
 
+void RSIStrategy::on_init() {
+    state_.clear();
+}
+
 std::vector<Order> RSIStrategy::on_bar(const StrategyContext& ctx) {
     std::vector<Order> orders;
 
@@ -40,11 +44,12 @@ std::vector<Order> RSIStrategy::on_bar(const StrategyContext& ctx) {
     }
 
     double current_rsi = ctx.rsi(period_);
+    SymbolState& st = state_[ctx.symbol];
 
     // RSI 从超卖区回升（上穿 oversold 线）
-    bool oversold_bounce = (prev_rsi_ < oversold_) && (current_rsi >= oversold_);
+    bool oversold_bounce = (st.prev_rsi < oversold_) && (current_rsi >= oversold_);
     // RSI 从超买区回落（下穿 overbought 线）
-    bool overbought_drop = (prev_rsi_ > overbought_) && (current_rsi <= overbought_);
+    bool overbought_drop = (st.prev_rsi > overbought_) && (current_rsi <= overbought_);
 
     if (oversold_bounce && !ctx.has_position()) {
         double available = ctx.cash * position_pct_;
@@ -58,7 +63,7 @@ std::vector<Order> RSIStrategy::on_bar(const StrategyContext& ctx) {
         orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
     }
 
-    prev_rsi_ = current_rsi;
+    st.prev_rsi = current_rsi;
 
     return orders;
 }

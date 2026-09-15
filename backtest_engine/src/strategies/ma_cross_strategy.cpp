@@ -42,6 +42,10 @@ std::map<std::string, std::string> MACrossStrategy::param_schema() const {
  * 金叉 = 上一根 bar 快线 ≤ 慢线，且当前 bar 快线 > 慢线
  * 死叉 = 上一根 bar 快线 ≥ 慢线，且当前 bar 快线 < 慢线
  */
+void MACrossStrategy::on_init() {
+    state_.clear();
+}
+
 std::vector<Order> MACrossStrategy::on_bar(const StrategyContext& ctx) {
     std::vector<Order> orders;
 
@@ -55,9 +59,11 @@ std::vector<Order> MACrossStrategy::on_bar(const StrategyContext& ctx) {
     double slow_ma = ctx.sma(slow_period_);
 
     // 第一次计算，只记录不交易（因为没有"上一根"的值）
-    if (prev_fast_ma_ == 0.0 && prev_slow_ma_ == 0.0) {
-        prev_fast_ma_ = fast_ma;
-        prev_slow_ma_ = slow_ma;
+    SymbolState& st = state_[ctx.symbol];
+
+    if (st.prev_fast_ma == 0.0 && st.prev_slow_ma == 0.0) {
+        st.prev_fast_ma = fast_ma;
+        st.prev_slow_ma = slow_ma;
         return orders;
     }
 
@@ -67,7 +73,7 @@ std::vector<Order> MACrossStrategy::on_bar(const StrategyContext& ctx) {
      * 现在快线在慢线上方（fast > slow）
      * → 快线从下往上穿越慢线
      */
-    bool golden_cross = (prev_fast_ma_ <= prev_slow_ma_) && (fast_ma > slow_ma);
+    bool golden_cross = (st.prev_fast_ma <= st.prev_slow_ma) && (fast_ma > slow_ma);
 
     /*
      * 死叉判断：
@@ -75,7 +81,7 @@ std::vector<Order> MACrossStrategy::on_bar(const StrategyContext& ctx) {
      * 现在快线在慢线下方（fast < slow）
      * → 快线从上往下穿越慢线
      */
-    bool death_cross = (prev_fast_ma_ >= prev_slow_ma_) && (fast_ma < slow_ma);
+    bool death_cross = (st.prev_fast_ma >= st.prev_slow_ma) && (fast_ma < slow_ma);
 
     if (golden_cross && !ctx.has_position()) {
         /*
@@ -101,8 +107,8 @@ std::vector<Order> MACrossStrategy::on_bar(const StrategyContext& ctx) {
     }
 
     // 更新上一根 bar 的均线值
-    prev_fast_ma_ = fast_ma;
-    prev_slow_ma_ = slow_ma;
+    st.prev_fast_ma = fast_ma;
+    st.prev_slow_ma = slow_ma;
 
     return orders;
 }

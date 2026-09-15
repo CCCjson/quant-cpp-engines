@@ -34,11 +34,18 @@ BacktestEngine::BacktestEngine(double initial_capital, CommissionConfig commissi
 /*
  * set_strategy — 接管策略对象的所有权
  *
- * ⚠️ 组合回测下**所有标的共用这一个策略实例**。
- * 策略如果在成员变量里存了跨 bar 的状态（比如 KDJ 的前值），那份状态会被
- * 所有标的共享 —— 这对无状态策略（DSL 回放 / 均线 / MACD 都是从 history 现算的）
- * 没有影响，但有状态的策略在多标的下会串味。
- * 现有 9 个策略都是从 ctx.history 现算的，故安全；新增有状态策略时要留意。
+ * ⚠️ 组合回测下**所有标的共用这一个策略实例**，而且同一个实例还可能被
+ * 复用于**连续多场回测**（服务端复用策略对象就是这个形态）。
+ * 所以策略只要在成员变量里存了跨 bar 的状态，就必须在 on_init() 里把它清掉 ——
+ * run() 每场开头都会调 on_init()。
+ *
+ * 🔴 这段注释此前写的是「现有 9 个策略都是从 ctx.history 现算的，故安全」。
+ *    **那句话是错的**：ma_cross / macd / rsi / kdj / bollinger 五个策略都在
+ *    成员里存了 prev_* 与 initialized_，而当时只有 PairsStrategy 覆写了
+ *    on_init()。于是它们在多标的下互相串味、在复用实例时把上一场的前值
+ *    带进下一场，在第一个被评估的 bar 上造出假交叉。
+ *    这五个策略现在都补上了 on_init()，由 tests/test_strategy_reset.cpp 钉住。
+ *    新增有状态策略时照做。
  */
 void BacktestEngine::set_strategy(std::unique_ptr<IStrategy> strategy) {
     strategy_ = std::move(strategy);

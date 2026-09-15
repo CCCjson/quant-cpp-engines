@@ -32,6 +32,10 @@ std::map<std::string, std::string> MACDStrategy::param_schema() const {
     };
 }
 
+void MACDStrategy::on_init() {
+    state_.clear();
+}
+
 std::vector<Order> MACDStrategy::on_bar(const StrategyContext& ctx) {
     std::vector<Order> orders;
 
@@ -41,17 +45,19 @@ std::vector<Order> MACDStrategy::on_bar(const StrategyContext& ctx) {
 
     auto m = ctx.macd(fast_period_, slow_period_, signal_period_);
 
-    if (!initialized_) {
-        prev_dif_ = m.dif;
-        prev_dea_ = m.dea;
-        initialized_ = true;
+    SymbolState& st = state_[ctx.symbol];
+
+    if (!st.initialized) {
+        st.prev_dif = m.dif;
+        st.prev_dea = m.dea;
+        st.initialized = true;
         return orders;
     }
 
     // DIF 上穿 DEA（金叉）
-    bool golden_cross = (prev_dif_ <= prev_dea_) && (m.dif > m.dea);
+    bool golden_cross = (st.prev_dif <= st.prev_dea) && (m.dif > m.dea);
     // DIF 下穿 DEA（死叉）
-    bool death_cross = (prev_dif_ >= prev_dea_) && (m.dif < m.dea);
+    bool death_cross = (st.prev_dif >= st.prev_dea) && (m.dif < m.dea);
 
     if (golden_cross && !ctx.has_position()) {
         double available = ctx.cash * position_pct_;
@@ -65,8 +71,8 @@ std::vector<Order> MACDStrategy::on_bar(const StrategyContext& ctx) {
         orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
     }
 
-    prev_dif_ = m.dif;
-    prev_dea_ = m.dea;
+    st.prev_dif = m.dif;
+    st.prev_dea = m.dea;
 
     return orders;
 }
