@@ -473,9 +473,9 @@ into pandas scalar indexing (H5) — the classic symptom of a hot path falling b
 interpreter and object layer. Same library, and using it right versus wrong differs by
 314×.
 
-**3. Cost to write and change** — 1,431 lines vs 8,570 lines
+**3. Cost to write and change** — 1,431 lines vs 9,100 lines
 
-What the Python reference engine does in 1,431 lines, the C++ engine takes 8,570
+What the Python reference engine does in 1,431 lines, the C++ engine takes 9,100
 lines to do (the latter does more — risk management, market rules, portfolio backtesting and
 six additional strategies — so this comparison is a rough order-of-magnitude reference, not a
 like-for-like line count).
@@ -887,7 +887,9 @@ Not by "the numbers came out close." By three layers:
    a 1 ULP difference. Without this, the two paths could get different contraction decisions and
    bit-exactness would be meaningless.
 3. **The parity gate**: all seven economic metrics against the Python reference are still
-   `0.00e+00`.
+   `0.00e+00` — and as of round four the gate covers `MACD` and `KDJ` as well as `MA_CROSS`,
+   so it now actually guards the code this round rewrote
+   (see [round four](#round-four-predict-first-then-touch-the-code)).
 
 Raw data: [`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json),
 produced by [`exp_incremental_engine.py`](exp_incremental_engine.py).
@@ -1069,15 +1071,66 @@ across sessions.**
 > **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
 > this machine was doing today, the slope measures the order of the algorithm.
 
-### About that parity-gate probe
+### The gate was not guarding the code that changed
+
+For a long time this parity gate ran only `MA_CROSS` — and `MA_CROSS` uses nothing but
+`sma()`. Which means `macd` / `rsi` / `kdj`, the three things round three actually rewrote,
+were **not covered by it at all**. The hardest gate in the repository was not guarding the code
+under change.
 
 This item is a **measured fact, not a prediction**. The brief was to probe first and then decide whether to widen the gate, so it ran before the pre-registration was written. Labelled as such rather than quietly folded in among the predictions.
 
-On benchmarks/data/cpp_bars.json (180 real daily bars — the same fixture the parity gate already uses):
+Probed on benchmarks/data/cpp_bars.json (180 real daily bars — the same fixture the parity gate already uses), then widened to match what the probe found:
 
-- **MACD** — all seven economic metrics at 0.00e+00 → added to the gate
-- **KDJ** — all seven economic metrics at 0.00e+00 → added to the gate
-- **RSI** — final equity differs by 5.58e+04 → **not** added; the divergence is diagnosed and written up instead. The gate is not loosened to accommodate it
+| Strategy | Largest of the seven diffs | In the gate? |
+|---|---|---|
+| `MA_CROSS` | `0.00e+00` | ✅ yes |
+| `MACD` | `0.00e+00` | ✅ yes |
+| `KDJ` | `0.00e+00` | ✅ yes |
+| `RSI` | `5.58e+04` | ❌ no — a registered divergence |
+
+Those three `0.00e+00`s are not luck. Here is how far each was from flipping:
+
+- `MACD`, at the bar closest to a crossover, has `dif − dea = −1.762e-02` while the two sides
+  disagree numerically by `2.44e-14` — **the margin is 7.2e11× the disagreement**.
+- `KDJ`, at its closest bar, has an identical `k − d` on both sides.
+
+> ⚠️ Do not read this as "C++ and pandas agree bit for bit." **The gate proves the economic
+> results are equal, not that the indicator values are.** MACD's indicator values still differ
+> by up to 6144 ULP (3.8e-14 relative) — eleven orders of magnitude short of flipping a
+> dif/dea crossover, so it never reaches a trade.
+
+### RSI: the one that stayed out, and why the gate was not loosened for it
+
+`RSI`'s largest of the seven diffs is `5.58e+04` — final equity
+1,746,918.39 on the Python side against
+1,691,152.97 on the C++ side.
+
+**The cause is not precision. The two sides compute two different definitions of RSI:**
+
+| | How the first `period` changes are handled |
+|---|---|
+| C++ (classic Wilder) | seeded with the SMA of those changes, then Wilder's recurrence |
+| `benchlib.add_rsi` | `ewm(alpha=1/period, adjust=False)`, seeded from **0** |
+
+The gap decays as `(1−1/period)^n`, a half-life of about 9.4 bars. Measured:
+
+- largest difference after warm-up: **9.0510** (bar 26)
+- by bar 179 it has decayed to **2.50e-05**
+- bars where the two sides disagree about a 30/70 crossing:
+  **[23, 24, 35]** — all early, and those three bars are where the
+  differing trade timings come from
+
+So this is a **warm-up definition divergence**, and it converges away on a long series.
+
+Getting it into the gate would take one of two things: **loosening the tolerance**, or
+**changing the Python reference**. The first destroys the point of the gate — `0.00e+00` carries
+weight in this repository precisely because it has never meant "within tolerance." The second
+edits the frozen control arm, and then there is no control.
+
+So: the third option. Diagnose it, quantify it, write it down here, and leave the gate exactly
+where it was. Every number above is recomputed by the gate script on each run — none of them
+are typed by hand.
 
 ---
 

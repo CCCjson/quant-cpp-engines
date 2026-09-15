@@ -3,7 +3,7 @@
     "bars": 180,
     "request": {
       "symbol": "TEST.SH",
-      "strategy": "MA_CROSS",
+      "strategy": "(多策略)",
       "params": {
         "fast_period": 5,
         "slow_period": 20,
@@ -64,6 +64,222 @@
       "cpp": 1.0,
       "diff": 0.0,
       "ok": true
+    }
+  ],
+  "gated_strategies": [
+    {
+      "strategy": "MA_CROSS",
+      "params": {
+        "fast_period": 5,
+        "slow_period": 20,
+        "position_pct": 0.95
+      },
+      "max_diff": 0.0,
+      "comparisons": [
+        {
+          "metric": "最终资产",
+          "python": 1448492.3318395005,
+          "cpp": 1448492.3318395005,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总收益率",
+          "python": 0.44849233183950044,
+          "cpp": 0.44849233183950044,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "年化收益率",
+          "python": 0.6798971009257946,
+          "cpp": 0.6798971009257946,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "最大回撤",
+          "python": 0.09834731542362063,
+          "cpp": 0.09834731542362063,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "回撤金额",
+          "python": 119475.7256924999,
+          "cpp": 119475.7256924999,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总手续费",
+          "python": 3612.7501604999998,
+          "cpp": 3612.7501604999998,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "胜率",
+          "python": 1.0,
+          "cpp": 1.0,
+          "diff": 0.0,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "strategy": "MACD",
+      "params": {
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9,
+        "position_pct": 0.95
+      },
+      "max_diff": 0.0,
+      "comparisons": [
+        {
+          "metric": "最终资产",
+          "python": 1621147.2792405009,
+          "cpp": 1621147.2792405009,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总收益率",
+          "python": 0.6211472792405008,
+          "cpp": 0.6211472792405008,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "年化收益率",
+          "python": 0.9667604231873426,
+          "cpp": 0.9667604231873426,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "最大回撤",
+          "python": 0.07275379270708118,
+          "cpp": 0.07275379270708118,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "回撤金额",
+          "python": 107266.65969499969,
+          "cpp": 107266.65969499969,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总手续费",
+          "python": 4022.5267595,
+          "cpp": 4022.5267595,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "胜率",
+          "python": 1.0,
+          "cpp": 1.0,
+          "diff": 0.0,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "strategy": "KDJ",
+      "params": {
+        "n": 9,
+        "m1": 3,
+        "m2": 3,
+        "oversold": 20.0,
+        "overbought": 80.0,
+        "position_pct": 0.95
+      },
+      "max_diff": 0.0,
+      "comparisons": [
+        {
+          "metric": "最终资产",
+          "python": 1378606.31438075,
+          "cpp": 1378606.31438075,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总收益率",
+          "python": 0.37860631438075004,
+          "cpp": 0.37860631438075004,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "年化收益率",
+          "python": 0.5675318314146593,
+          "cpp": 0.5675318314146593,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "最大回撤",
+          "python": 0.1307222323718209,
+          "cpp": 0.1307222323718209,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "回撤金额",
+          "python": 148426.0,
+          "cpp": 148426.0,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "总手续费",
+          "python": 5130.90861925,
+          "cpp": 5130.90861925,
+          "diff": 0.0,
+          "ok": true
+        },
+        {
+          "metric": "胜率",
+          "python": 1.0,
+          "cpp": 1.0,
+          "diff": 0.0,
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "diagnosed_divergences": [
+    {
+      "strategy": "RSI",
+      "params": {
+        "period": 14,
+        "oversold": 30.0,
+        "overbought": 70.0,
+        "position_pct": 0.95
+      },
+      "max_diff": 55765.415080499835,
+      "gated": false,
+      "python_final_value": 1746918.3853862504,
+      "cpp_final_value": 1691152.9703057506,
+      "detail": {
+        "available": true,
+        "max_abs_diff": 9.051015639718834,
+        "max_abs_diff_at_bar": 26,
+        "final_bar_diff": 2.503462580705218e-05,
+        "settles_below_1e-1_from_bar": 92,
+        "settles_below_1e-3_from_bar": 154,
+        "threshold_crossing_disagreements": [
+          23,
+          24,
+          35
+        ],
+        "cause": "两侧算的是**两个不同定义的 RSI**，不是精度问题：C++ 用经典 Wilder —— 前 period 个 change 先取 SMA 作种子，之后转递推；benchlib.add_rsi 用 pandas ewm(alpha=1/period, adjust=False)，从 **0** 起播种。两者之差按 (1-1/period)^n 衰减，半衰期约 9.4 根，到第 179 根已衰减到 2.5e-05 量级 —— 也就是说这是一处**预热期定义分歧**，长序列上会自行收敛。",
+        "why_not_gated": "要让它进门禁只有两条路：放宽容差，或改 benchlib 的 RSI 定义。前者毁掉门禁的全部意义，后者动了冻结的对照臂。所以选第三条：查清、量化、登记在案，闸门一寸不让。"
+      }
     }
   ],
   "known_differences": {

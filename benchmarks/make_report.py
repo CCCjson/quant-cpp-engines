@@ -94,6 +94,26 @@ def drift_table(lang="zh"):
 
 
 # 剖析里能测出来的最大占比 —— 现算，不写死
+def gate_table(lang="zh"):
+    """门禁覆盖了哪些策略，以及登记在案的分歧。"""
+    head = ("| 策略 | 七项经济指标最大差 | 是否进门禁 |\n|---|---|---|" if lang == "zh"
+            else "| Strategy | Largest of the seven diffs | In the gate? |\n|---|---|---|")
+    rows = []
+    for g in parity.get("gated_strategies", []):
+        yes = "✅ 是" if lang == "zh" else "✅ yes"
+        rows.append(f"| `{g['strategy']}` | `{g['max_diff']:.2e}` | {yes} |")
+    for d in parity.get("diagnosed_divergences", []):
+        no = "❌ 否 —— 已登记的分歧" if lang == "zh" else "❌ no — a registered divergence"
+        rows.append(f"| `{d['strategy']}` | `{d['max_diff']:.2e}` | {no} |")
+    return head + "\n" + "\n".join(rows)
+
+
+# RSI 分歧的实测数字 —— 现算，不写死
+_rsi = next((d["detail"] for d in parity.get("diagnosed_divergences", [])
+             if d["strategy"] == "RSI" and d.get("detail")), None)
+_rsi_row = next((d for d in parity.get("diagnosed_divergences", [])
+                 if d["strategy"] == "RSI"), None)
+
 _measurable = [r for r in profile["results"] if not r["inconclusive"]]
 profile_max_share = max(r["indicator_share"] for r in _measurable) * 100
 profile_min_share = min(r["indicator_share"] for r in _measurable) * 100
@@ -1081,7 +1101,9 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 2. **`-ffp-contract=off`**：禁止编译器把 `a*b+c` 收缩成一条 FMA。实测同一份源码
    默认会编出 3 条 `fmadd`，而 FMA 少一次舍入、差 1 ULP。不关掉的话两条路径可能
    拿到不同的收缩决策，逐位等价就无从谈起。
-3. **parity 门禁**：C++ 与 Python 参照引擎的七项经济指标仍然全部 `0.00e+00`。
+3. **parity 门禁**：C++ 与 Python 参照引擎的七项经济指标仍然全部 `0.00e+00` ——
+   而且从第四轮起门禁除 `MA_CROSS` 外还覆盖了 `MACD` 与 `KDJ`，
+   它现在真的在守这一轮改过的代码（见[第四轮](#第四轮先预测再动手)）。
 
 原始数据：[`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json)，
 由 [`exp_incremental_engine.py`](exp_incremental_engine.py) 生成。
@@ -1198,15 +1220,55 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 > **这正是斜率比倍数更值得信的原因**：倍数量的是这台机器今天的状态，
 > 斜率量的是算法的阶数。
 
-### 关于 parity 门禁的那次预探
+### 门禁本来守的不是被改动的代码
+
+一直以来这道 parity 门禁只跑 `MA_CROSS`，而 `MA_CROSS` 只用 `sma()`。
+也就是说第三轮改掉的 `macd` / `rsi` / `kdj`，**一个都没进门禁** ——
+号称最硬的那道闸门，守的不是被改的那部分代码。
 
 {prereg['parity_probe']['_note']}
 
-在 {prereg['parity_probe']['fixture']} 上：
+在 {prereg['parity_probe']['fixture']} 上探完，按实测结果扩：
 
-- **MACD** — {prereg['parity_probe']['findings']['MACD']}
-- **KDJ** — {prereg['parity_probe']['findings']['KDJ']}
-- **RSI** — {prereg['parity_probe']['findings']['RSI']}
+{gate_table('zh')}
+
+三个 `0.00e+00` 不是侥幸过的。量了一下离翻转还有多远：
+
+- `MACD` 最接近翻转的那根 bar，`dif − dea = −1.762e-02`，而两侧的数值分歧是
+  `2.44e-14` —— **余量是分歧的 7.2e11 倍**。
+- `KDJ` 最接近翻转的那根 bar，两侧的 `k − d` 完全相同。
+
+> ⚠️ 别把这读成「C++ 和 pandas 逐位一致」。**门禁证明的是经济结果相等，
+> 不是指标位模式相等。** MACD 两侧的指标值仍有 ≤6144 ULP 的分歧
+> （相对 3.8e-14），只是离 dif/dea 翻转差着十一个数量级，落不到成交上。
+
+### RSI：唯一没进门禁的那个，以及为什么不降门禁
+
+`RSI` 七项里最大差 `{_rsi_row['max_diff']:.2e}` —— 最终资产
+Python {_rsi_row['python_final_value']:,.2f} vs C++ {_rsi_row['cpp_final_value']:,.2f}。
+
+**根因不是精度，是两侧算的本来就是两个不同定义的 RSI：**
+
+| | 前 `period` 个 change 怎么处理 |
+|---|---|
+| C++（经典 Wilder） | 先取 SMA 作种子，之后转 Wilder 递推 |
+| `benchlib.add_rsi` | `ewm(alpha=1/period, adjust=False)`，从 **0** 起播种 |
+
+两者之差按 `(1−1/period)^n` 衰减，半衰期约 9.4 根。实测：
+
+- 过预热期后最大差 **{_rsi['max_abs_diff']:.4f}**（第 {_rsi['max_abs_diff_at_bar']} 根）
+- 到第 179 根衰减到 **{_rsi['final_bar_diff']:.2e}**
+- 30/70 穿越事件两侧不一致的 bar：**{_rsi['threshold_crossing_disagreements']}** ——
+  全在早期，成交时点不同就是从这三根来的
+
+所以这是一处**预热期定义分歧**，长序列上自行收敛。
+
+要让它进门禁只有两条路：**放宽容差**，或**改 Python 参照实现**。
+前者毁掉门禁的全部意义 —— 这个仓库里 `0.00e+00` 之所以有分量，正因为它
+从来不是「在容差之内」；后者动了冻结的对照臂，对照就不成立了。
+
+所以选第三条：查清、量化、写在这里，闸门一寸不让。
+门禁脚本每次运行都会把上面这些数字**重新算一遍**打出来，它们不是手抄的。
 
 ---
 

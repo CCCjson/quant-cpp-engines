@@ -931,7 +931,9 @@ Not by "the numbers came out close." By three layers:
    a 1 ULP difference. Without this, the two paths could get different contraction decisions and
    bit-exactness would be meaningless.
 3. **The parity gate**: all seven economic metrics against the Python reference are still
-   `0.00e+00`.
+   `0.00e+00` — and as of round four the gate covers `MACD` and `KDJ` as well as `MA_CROSS`,
+   so it now actually guards the code this round rewrote
+   (see [round four](#round-four-predict-first-then-touch-the-code)).
 
 Raw data: [`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json),
 produced by [`exp_incremental_engine.py`](exp_incremental_engine.py).
@@ -1065,15 +1067,61 @@ across sessions.**
 > **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
 > this machine was doing today, the slope measures the order of the algorithm.
 
-### About that parity-gate probe
+### The gate was not guarding the code that changed
+
+For a long time this parity gate ran only `MA_CROSS` — and `MA_CROSS` uses nothing but
+`sma()`. Which means `macd` / `rsi` / `kdj`, the three things round three actually rewrote,
+were **not covered by it at all**. The hardest gate in the repository was not guarding the code
+under change.
 
 {prereg['parity_probe']['_note_en']}
 
-On {prereg['parity_probe']['fixture_en']}:
+Probed on {prereg['parity_probe']['fixture_en']}, then widened to match what the probe found:
 
-- **MACD** — {prereg['parity_probe']['findings_en']['MACD']}
-- **KDJ** — {prereg['parity_probe']['findings_en']['KDJ']}
-- **RSI** — {prereg['parity_probe']['findings_en']['RSI']}
+{gate_table('en')}
+
+Those three `0.00e+00`s are not luck. Here is how far each was from flipping:
+
+- `MACD`, at the bar closest to a crossover, has `dif − dea = −1.762e-02` while the two sides
+  disagree numerically by `2.44e-14` — **the margin is 7.2e11× the disagreement**.
+- `KDJ`, at its closest bar, has an identical `k − d` on both sides.
+
+> ⚠️ Do not read this as "C++ and pandas agree bit for bit." **The gate proves the economic
+> results are equal, not that the indicator values are.** MACD's indicator values still differ
+> by up to 6144 ULP (3.8e-14 relative) — eleven orders of magnitude short of flipping a
+> dif/dea crossover, so it never reaches a trade.
+
+### RSI: the one that stayed out, and why the gate was not loosened for it
+
+`RSI`'s largest of the seven diffs is `{_rsi_row['max_diff']:.2e}` — final equity
+{_rsi_row['python_final_value']:,.2f} on the Python side against
+{_rsi_row['cpp_final_value']:,.2f} on the C++ side.
+
+**The cause is not precision. The two sides compute two different definitions of RSI:**
+
+| | How the first `period` changes are handled |
+|---|---|
+| C++ (classic Wilder) | seeded with the SMA of those changes, then Wilder's recurrence |
+| `benchlib.add_rsi` | `ewm(alpha=1/period, adjust=False)`, seeded from **0** |
+
+The gap decays as `(1−1/period)^n`, a half-life of about 9.4 bars. Measured:
+
+- largest difference after warm-up: **{_rsi['max_abs_diff']:.4f}** (bar {_rsi['max_abs_diff_at_bar']})
+- by bar 179 it has decayed to **{_rsi['final_bar_diff']:.2e}**
+- bars where the two sides disagree about a 30/70 crossing:
+  **{_rsi['threshold_crossing_disagreements']}** — all early, and those three bars are where the
+  differing trade timings come from
+
+So this is a **warm-up definition divergence**, and it converges away on a long series.
+
+Getting it into the gate would take one of two things: **loosening the tolerance**, or
+**changing the Python reference**. The first destroys the point of the gate — `0.00e+00` carries
+weight in this repository precisely because it has never meant "within tolerance." The second
+edits the frozen control arm, and then there is no control.
+
+So: the third option. Diagnose it, quantify it, write it down here, and leave the gate exactly
+where it was. Every number above is recomputed by the gate script on each run — none of them
+are typed by hand.
 
 ---
 
