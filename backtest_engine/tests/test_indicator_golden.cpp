@@ -38,6 +38,7 @@
 
 #include <gtest/gtest.h>
 
+#include "backtest/indicators.h"
 #include "backtest/strategy_context.h"
 #include "backtest/data_loader.h"
 
@@ -403,4 +404,181 @@ TEST(GoldenIndicatorTest, DifferentParameterSetsDoNotShareState) {
         EXPECT_EQ(bits(a_inc.dif), bits(a_ref.dif)) << "bar#" << i << " (12,26,9) 组被串了";
         EXPECT_EQ(bits(b_inc.dif), bits(b_ref.dif)) << "bar#" << i << " (5,35,5) 组被串了";
     }
+}
+
+/*
+ * ============================================================
+ * reset() 语义：单独测，不靠别的用例顺带覆盖
+ * ============================================================
+ *
+ * 这一组是本轮新加的。上一轮把指标改成增量递推时，递推状态散在
+ * IndicatorSlot 的 c0/c1/c2/c_count/seeded 五个通用字段里，
+ * **reset 这件事根本没有名字**，也就无从断言 —— 它只能间接地靠
+ * 「重新构造一个 IndicatorState」来达成。
+ *
+ * 现在 indicators.h 里每个指标都有 reset()，可以直接调、直接比。
+ * 而「用过的对象再用一次，行为必须和全新的一样」正是
+ * tests/test_strategy_reset.cpp 在策略层抓到那一整类 bug 的同一个不变量。
+ */
+
+// 把一个指标喂完整条序列，返回逐根 bar 的值（位模式）
+template <typename Ind, typename Get>
+std::vector<std::uint64_t> feed(Ind& ind, const std::vector<Bar>& bars, Get get) {
+    std::vector<std::uint64_t> out;
+    out.reserve(bars.size());
+    for (const auto& b : bars) {
+        ind.update(b);
+        out.push_back(bits(get(ind)));
+    }
+    return out;
+}
+
+TEST(IndicatorResetTest, ResetMakesAUsedObjectEquivalentToAFreshOne) {
+    const std::vector<Bar> bars = real_series();
+    const std::vector<Bar> other = flat_series();   // 先拿另一条序列把状态弄脏
+
+    {
+        MacdIndicator fresh(12, 26, 9), reused(12, 26, 9);
+        const auto want = feed(fresh, bars, [](const MacdIndicator& i) { return i.value().dif; });
+        feed(reused, other, [](const MacdIndicator& i) { return i.value().dif; });
+        reused.reset();
+        const auto got = feed(reused, bars, [](const MacdIndicator& i) { return i.value().dif; });
+        EXPECT_EQ(got, want) << "MacdIndicator：reset() 之后与全新对象不等价";
+        EXPECT_EQ(reused.bars_seen(), fresh.bars_seen());
+    }
+    {
+        RsiIndicator fresh(14), reused(14);
+        const auto want = feed(fresh, bars, [](const RsiIndicator& i) { return i.value(); });
+        feed(reused, other, [](const RsiIndicator& i) { return i.value(); });
+        reused.reset();
+        const auto got = feed(reused, bars, [](const RsiIndicator& i) { return i.value(); });
+        EXPECT_EQ(got, want) << "RsiIndicator：reset() 之后与全新对象不等价";
+    }
+    {
+        auto k_of = [](const KdjIndicator& i) { return i.value().k; };
+        KdjIndicator fresh(9, 3, 3);
+        const auto want = feed(fresh, bars, k_of);
+
+        /*
+         * 两种脏序列长度都测：一种比 n 短（窗口半满），一种比 n 长（窗口已满）。
+         *
+         * ⚠️ 顺带记一条实测出来的事实，免得后人白花时间：
+         *    把 `window_.clear()` 和 `head_ = 0` 从 reset() 里整个删掉，
+         *    这两种情形**都还是绿的**，而且那不是测试的洞 —— 窗口是自愈的。
+         *    设窗口里残留 m 个陈旧条目（m ≤ n），则随后前 n−m 次 update 走
+         *    push_back 把它填满，后 m 次正好覆盖掉那 m 个陈旧槽；
+         *    而第一次读取发生在第 n 次 update。也就是说陈旧数据一定在被读到
+         *    之前被冲干净。
+         *
+         *    真正会出错的是漏清 **count_**：那会让预热期判定错位。
+         *    实测注入那个缺陷，下面三个用例里有三个变红。
+         *    所以这一组的判别力在载体与计数上，不在窗口上。
+         */
+        for (size_t dirty_len : {size_t{3}, other.size()}) {
+            const std::vector<Bar> dirty(other.begin(),
+                                         other.begin() + static_cast<std::ptrdiff_t>(dirty_len));
+            KdjIndicator reused(9, 3, 3);
+            feed(reused, dirty, k_of);
+            reused.reset();
+            const auto got = feed(reused, bars, k_of);
+            EXPECT_EQ(got, want)
+                << "KdjIndicator：先喂 " << dirty_len
+                << " 根再 reset()，之后与全新对象不等价 —— "
+                   "窗口与 head_ 没清干净，前 n 根读到了上一条序列的高低价";
+        }
+    }
+}
+
+/*
+ * reset() 之后喂同一条序列，必须逐位命中金标准 —— 不只是「和全新对象一样」，
+ * 而是**和改动之前的朴素实现一样**。两件事都要，少一件都不够：
+ * 两个同样错的对象也能互相「等价」。
+ */
+TEST(IndicatorResetTest, ReusedIndicatorStillHitsTheGoldenFixture) {
+    const std::vector<Bar> bars = real_series();
+    const json& rows = golden().at("series").at("real_180");
+
+    MacdIndicator macd(12, 26, 9);
+    RsiIndicator rsi(14);
+    KdjIndicator kdj(9, 3, 3);
+
+    for (const auto& b : flat_series()) {        // 先弄脏
+        macd.update(b); rsi.update(b); kdj.update(b);
+    }
+    macd.reset(); rsi.reset(); kdj.reset();
+
+    for (size_t i = 0; i < bars.size(); ++i) {
+        macd.update(bars[i]); rsi.update(bars[i]); kdj.update(bars[i]);
+        const json& g = rows[i];
+        const std::string tag = "reset 之后 bar#" + std::to_string(i) + " ";
+        EXPECT_BITWISE_EQ(macd.value().dif, from_hex(g.at("macd_dif")), tag + "macd.dif");
+        EXPECT_BITWISE_EQ(macd.value().dea, from_hex(g.at("macd_dea")), tag + "macd.dea");
+        EXPECT_BITWISE_EQ(rsi.value(), from_hex(g.at("rsi14")), tag + "rsi(14)");
+        EXPECT_BITWISE_EQ(kdj.value().k, from_hex(g.at("kdj_k")), tag + "kdj.k");
+        EXPECT_BITWISE_EQ(kdj.value().d, from_hex(g.at("kdj_d")), tag + "kdj.d");
+    }
+}
+
+/*
+ * IndicatorState::reset() 把所有槽一起清干净 —— 包括 valid_size 与指纹。
+ *
+ * ⚠️ 只清递推载体、忘了清 valid_size 的话，下一场回测的第一次调用会看到
+ *    「valid_size 正好等于 n-1」而误判成「可以步进一步」，于是拿着一个刚被
+ *    清零的载体推一步就发布。那个值错得毫无征兆。这个用例专打这一点。
+ */
+TEST(IndicatorResetTest, IndicatorStateResetClearsPublishedMarkersToo) {
+    const std::vector<Bar> bars = real_series();
+    const json& rows = golden().at("series").at("real_180");
+
+    IndicatorState st;
+    std::vector<Bar> hist;
+
+    auto run_series = [&](const std::vector<Bar>& src, bool check) {
+        hist.clear();
+        for (size_t i = 0; i < src.size(); ++i) {
+            hist.push_back(src[i]);
+            StrategyContext ctx;
+            ctx.bar_index = static_cast<int>(i);
+            ctx.current_bar = src[i];
+            ctx.history = &hist;
+            ctx.indicators = &st;
+            const auto m = ctx.macd(12, 26, 9);
+            const double r = ctx.rsi(14);
+            const auto k = ctx.kdj(9, 3, 3);
+            if (check) {
+                const json& g = rows[i];
+                const std::string tag = "第二场 bar#" + std::to_string(i) + " ";
+                EXPECT_BITWISE_EQ(m.dif, from_hex(g.at("macd_dif")), tag + "macd.dif");
+                EXPECT_BITWISE_EQ(r, from_hex(g.at("rsi14")), tag + "rsi(14)");
+                EXPECT_BITWISE_EQ(k.k, from_hex(g.at("kdj_k")), tag + "kdj.k");
+            }
+        }
+    };
+
+    run_series(flat_series(), false);    // 第一场：把状态弄脏
+    st.reset();
+    run_series(bars, true);              // 第二场：必须逐位命中金标准
+}
+
+/*
+ * 文档性用例：update() **不做**幂等保护，同一根 bar 喂两次就是推进两次。
+ *
+ * 这是刻意的分工 —— 幂等性由 StrategyContext 那层的 valid_size 提供
+ * （ComboStrategy 每根 bar 会调两次 ctx.macd()）。
+ * 把这条写成测试，是为了防止将来有人「顺手」在 update() 里加一道去重，
+ * 那样两层各有一份判断逻辑，一旦不一致就是静默的错值。
+ */
+TEST(IndicatorResetTest, UpdateIsUnconditionalByDesign) {
+    const std::vector<Bar> bars = real_series();
+
+    MacdIndicator once(12, 26, 9), twice(12, 26, 9);
+    for (size_t i = 0; i < 40; ++i) {
+        once.update(bars[i]);
+        twice.update(bars[i]);
+        twice.update(bars[i]);           // 同一根喂两次
+    }
+    EXPECT_EQ(once.bars_seen(), 40);
+    EXPECT_EQ(twice.bars_seen(), 80) << "update() 不应该自己去重 —— 幂等由门面层负责";
+    EXPECT_NE(bits(once.value().dif), bits(twice.value().dif))
+        << "喂两遍却得到同样的值，说明 update() 里悄悄加了去重逻辑";
 }

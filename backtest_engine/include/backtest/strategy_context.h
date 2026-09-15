@@ -21,6 +21,7 @@
 #pragma once
 
 #include "types.h"
+#include "indicators.h"
 #include <vector>
 #include <string>
 #include <numeric>     // std::accumulate — 用于求和
@@ -77,36 +78,94 @@ namespace backtest {
  * 另外 CMakeLists 里的 -ffp-contract=off 保证编译器不会在某一条路径上
  * 把 a*b+c 收缩成 FMA（少一次舍入，差 1 ULP）而另一条路径不收缩。
  */
+/*
+ * 一个指标实例的「槽」：参数 + 上一次发布到哪根 bar + 递推载体。
+ *
+ * 载体现在是 indicators.h 里的强类型指标对象，不再是 c0/c1/c2 这种
+ * 三个指标共用、各自赋予不同含义的通用字段。
+ *
+ * ── 为什么「读」必须是幂等的 ──
+ *
+ * 朴素实现是**纯函数**：同一根 bar 上调用两次得到同样的值。
+ * 而 ComboStrategy 会把 context 按值复制两份、对每个子策略**每根 bar 调用两次**
+ * （combo_strategy.cpp）。如果改成「每次调用步进一次递推」，那里就会被步进两次。
+ *
+ * 所以缓存以「这个值描述的是第几根 bar」（valid_size）为键：
+ *   n == valid_size      → 直接返回已发布的值，不动递推状态（第二次调用免费且正确）
+ *   n == valid_size + 1  → 且上一根 bar 指纹吻合 → 步进一次
+ *   其它                  → reset() 之后从头重放一遍（O(N)，只发生一次）
+ *
+ * ── 为什么不用指针身份判断「是不是同一条序列」 ──
+ *
+ * tests/test_strategies.cpp 每根 bar 把 ctx.history 指向一个**全新的子 vector**，
+ * 地址每次都不同。靠指针身份会让那些测试要么每根都重算（正确但零收益），
+ * 要么在栈地址被复用时给出**错误**答案。所以按内容判断：比对上一根 bar 的
+ * date/close/high/low。
+ */
+template <typename Ind>
 struct IndicatorSlot {
-    int kind = 0;                 // 0=macd 1=rsi 2=kdj
-    int p0 = 0, p1 = 0, p2 = 0;   // 参数（不同参数各占一个 slot）
-
-    long long valid_size = -1;    // 已发布的值描述的是 history->size() 等于多少时
+    int p0 = 0, p1 = 0, p2 = 0;      // 参数（不同参数各占一个槽）
+    long long valid_size = -1;       // 已发布的值描述的是 history->size() 等于多少时
 
     // 上一根 bar 的指纹（判断是不是同一条序列的自然延长）
     std::string fp_date;
     double fp_close = 0.0, fp_high = 0.0, fp_low = 0.0;
 
-    // 递推载体
-    double c0 = 0.0, c1 = 0.0, c2 = 0.0;
-    long long c_count = 0;        // rsi 用：已消费了多少个 change
-    bool seeded = false;
+    Ind ind;                         // 递推载体
 
-    // 已发布的值（含预热期的哨兵）
-    double v0 = 0.0, v1 = 0.0, v2 = 0.0;
+    IndicatorSlot(int a, int b, int c, Ind i)
+        : p0(a), p1(b), p2(c), ind(std::move(i)) {}
+
+    bool matches(int a, int b, int c) const { return p0 == a && p1 == b && p2 == c; }
+
+    bool continues(const Bar& prev) const {
+        return fp_date == prev.date && fp_close == prev.close
+            && fp_high == prev.high && fp_low == prev.low;
+    }
+
+    void stamp(long long n, const Bar& last) {
+        valid_size = n;
+        fp_date = last.date;
+        fp_close = last.close;
+        fp_high = last.high;
+        fp_low = last.low;
+    }
 };
 
+/*
+ * 每个标的一份，由引擎持有（engine.cpp 的 SymbolState）。
+ *
+ * 三种指标分开存，不走虚函数派发：槽的数量通常 ≤ 6，线性查找足够，
+ * 而强类型让 value() 各返回各的（macd 三个分量、rsi 一个），
+ * 不必硬凑一个谁都不合身的公共返回类型。
+ */
 struct IndicatorState {
-    std::vector<IndicatorSlot> slots;   // 通常 ≤ 6 个，线性查找足够
+    std::vector<IndicatorSlot<MacdIndicator>> macd_slots;
+    std::vector<IndicatorSlot<RsiIndicator>>  rsi_slots;
+    std::vector<IndicatorSlot<KdjIndicator>>  kdj_slots;
 
-    IndicatorSlot& slot_for(int kind, int p0, int p1, int p2) {
-        for (auto& s : slots) {
-            if (s.kind == kind && s.p0 == p0 && s.p1 == p1 && s.p2 == p2) return s;
-        }
-        IndicatorSlot s;
-        s.kind = kind; s.p0 = p0; s.p1 = p1; s.p2 = p2;
-        slots.push_back(s);
-        return slots.back();
+    IndicatorSlot<MacdIndicator>& macd_slot(int fast, int slow, int signal) {
+        for (auto& s : macd_slots) if (s.matches(fast, slow, signal)) return s;
+        macd_slots.emplace_back(fast, slow, signal,
+                                MacdIndicator(fast, slow, signal));
+        return macd_slots.back();
+    }
+    IndicatorSlot<RsiIndicator>& rsi_slot(int period) {
+        for (auto& s : rsi_slots) if (s.matches(period, 0, 0)) return s;
+        rsi_slots.emplace_back(period, 0, 0, RsiIndicator(period));
+        return rsi_slots.back();
+    }
+    IndicatorSlot<KdjIndicator>& kdj_slot(int n, int m1, int m2) {
+        for (auto& s : kdj_slots) if (s.matches(n, m1, m2)) return s;
+        kdj_slots.emplace_back(n, m1, m2, KdjIndicator(n, m1, m2));
+        return kdj_slots.back();
+    }
+
+    /* 全部清回初值。每场回测开始时应当拿到的就是这个状态。 */
+    void reset() {
+        for (auto& s : macd_slots) { s.ind.reset(); s.valid_size = -1; s.fp_date.clear(); }
+        for (auto& s : rsi_slots)  { s.ind.reset(); s.valid_size = -1; s.fp_date.clear(); }
+        for (auto& s : kdj_slots)  { s.ind.reset(); s.valid_size = -1; s.fp_date.clear(); }
     }
 };
 
@@ -269,61 +328,13 @@ struct StrategyContext {
     // ── 扩展技术指标 ──
 
     /*
-     * 指数移动平均线（EMA）
-     * EMA 给近期价格更高的权重，比 SMA 更灵敏。
-     * 权重因子 alpha = 2 / (period + 1)
-     */
-    double ema(int period) const {
-        if (!history || static_cast<int>(history->size()) < period) {
-            return 0.0;
-        }
-        double alpha = 2.0 / (period + 1);
-        int n = static_cast<int>(history->size());
-        // 用最早的 period 个数据的 SMA 作为初始值
-        double result = 0.0;
-        for (int i = 0; i < period; ++i) {
-            result += (*history)[i].close;
-        }
-        result /= period;
-        // 从 period 位置开始递推
-        for (int i = period; i < n; ++i) {
-            result = alpha * (*history)[i].close + (1.0 - alpha) * result;
-        }
-        return result;
-    }
-
-    /*
-     * 计算指定数据序列在特定 offset 处的 EMA（内部辅助）
-     * prices: 收盘价序列
-     * period: EMA 周期
-     * end_idx: 计算到哪个位置（包含）
-     */
-    static double ema_at(const std::vector<double>& prices, int period, int end_idx) {
-        if (end_idx < 0 || period <= 0) return 0.0;
-        double alpha = 2.0 / (period + 1);
-        int actual_start = std::min(period, end_idx + 1);
-        double result = 0.0;
-        for (int i = 0; i < actual_start; ++i) {
-            result += prices[i];
-        }
-        result /= actual_start;
-        for (int i = actual_start; i <= end_idx; ++i) {
-            result = alpha * prices[i] + (1.0 - alpha) * result;
-        }
-        return result;
-    }
-
-    /*
      * MACD 指标（三线）
      * DIF = EMA(fast) - EMA(slow)
      * DEA = EMA(DIF, signal)
      * HIST = 2 * (DIF - DEA)
      */
-    struct MACDResult {
-        double dif = 0.0;
-        double dea = 0.0;
-        double hist = 0.0;
-    };
+    // 值类型现在住在 indicators.h，这里留个别名保持调用方源码不变
+    using MACDResult = MacdValue;
 
     /*
      * MACD。O(1) 每 bar（首次或序列不连续时 O(N) 重算一次）。
@@ -337,34 +348,14 @@ struct StrategyContext {
      * 一直从 index 0 跑着。所以增量版在预热期同样要步进载体，只是把**发布值**
      * 压成哨兵 {0,0,0}。漏掉这一点，过了预热期的第一个值就会错。
      */
-    MACDResult macd(int fast_period = 12, int slow_period = 26, int signal_period = 9) const {
-        MACDResult r;
-        if (!history || history->empty()) return r;
-        const int n = static_cast<int>(history->size());
-
+    MACDResult macd(int fast_period = 12, int slow_period = 26,
+                    int signal_period = 9) const {
+        if (!history || history->empty()) return MACDResult{};
         if (!indicators) return macd_full(fast_period, slow_period, signal_period);
 
-        IndicatorSlot& sl = indicators->slot_for(0, fast_period, slow_period, signal_period);
-
-        if (sl.valid_size == n) {            // 同一根 bar 上的重复调用：原样返回
-            r.dif = sl.v0; r.dea = sl.v1; r.hist = sl.v2;
-            return r;
-        }
-        if (sl.valid_size == n - 1 && n >= 2 && matches_fp(sl, (*history)[n - 2])) {
-            const double close = (*history)[n - 1].close;
-            const double af = 2.0 / (fast_period + 1);
-            const double as = 2.0 / (slow_period + 1);
-            const double asig = 2.0 / (signal_period + 1);
-            sl.c0 = af * close + (1.0 - af) * sl.c0;     // ema_fast
-            sl.c1 = as * close + (1.0 - as) * sl.c1;     // ema_slow
-            const double dif = sl.c0 - sl.c1;
-            sl.c2 = asig * dif + (1.0 - asig) * sl.c2;   // dea
-            publish_macd(sl, n, slow_period, dif, sl.c2, (*history)[n - 1]);
-        } else {
-            rebuild_macd(sl, fast_period, slow_period, signal_period);
-        }
-        r.dif = sl.v0; r.dea = sl.v1; r.hist = sl.v2;
-        return r;
+        auto& sl = indicators->macd_slot(fast_period, slow_period, signal_period);
+        advance(sl);
+        return sl.ind.value();
     }
 
     /*
@@ -387,26 +378,12 @@ struct StrategyContext {
      */
     double rsi(int period = 14) const {
         if (!history || history->empty()) return 50.0;
-        const int n = static_cast<int>(history->size());
-
         if (!indicators) return rsi_full(period);
 
-        IndicatorSlot& sl = indicators->slot_for(1, period, 0, 0);
-
-        if (sl.valid_size == n) return sl.v0;
-
-        if (sl.valid_size == n - 1 && n >= 2 && matches_fp(sl, (*history)[n - 2])) {
-            const double close = (*history)[n - 1].close;
-            const double ch = close - sl.c2;      // 本根 bar 的 change
-            sl.c2 = close;
-            step_rsi_change(sl, period, ch);
-            publish_rsi(sl, n, period, (*history)[n - 1]);
-        } else {
-            rebuild_rsi(sl, period);
-        }
-        return sl.v0;
+        auto& sl = indicators->rsi_slot(period);
+        advance(sl);
+        return sl.ind.value();
     }
-
 
     /*
      * KDJ 指标
@@ -415,11 +392,7 @@ struct StrategyContext {
      * D = EMA(K, m2)
      * J = 3K - 2D
      */
-    struct KDJResult {
-        double k = 50.0;
-        double d = 50.0;
-        double j = 50.0;
-    };
+    using KDJResult = KdjValue;
 
     /*
      * KDJ。从 O(N·n) 每 bar 降到 O(n) 每 bar（n 是窗口长度，默认 9）——
@@ -435,31 +408,13 @@ struct StrategyContext {
      * 专门打这个分支。
      */
     KDJResult kdj(int n = 9, int m1 = 3, int m2 = 3) const {
-        KDJResult r;
-        if (!history || history->empty()) return r;
-        const int len = static_cast<int>(history->size());
-
+        if (!history || history->empty()) return KDJResult{};
         if (!indicators) return kdj_full(n, m1, m2);
 
-        IndicatorSlot& sl = indicators->slot_for(2, n, m1, m2);
-
-        if (sl.valid_size == len) {
-            r.k = sl.v0; r.d = sl.v1; r.j = sl.v2;
-            return r;
-        }
-        if (sl.valid_size == len - 1 && len >= 2 && matches_fp(sl, (*history)[len - 2])) {
-            if (len >= n) {
-                if (!sl.seeded) { sl.c0 = 50.0; sl.c1 = 50.0; sl.seeded = true; }
-                step_kdj(sl, len - 1, n, m1, m2);
-            }
-            publish_kdj(sl, len, n, (*history)[len - 1]);
-        } else {
-            rebuild_kdj(sl, n, m1, m2);
-        }
-        r.k = sl.v0; r.d = sl.v1; r.j = sl.v2;
-        return r;
+        auto& sl = indicators->kdj_slot(n, m1, m2);
+        advance(sl);
+        return sl.ind.value();
     }
-
 
     /*
      * 布林带（Bollinger Bands）
@@ -502,26 +457,44 @@ struct StrategyContext {
 
 private:
     // ────────────────────────────────────────────────────────
-    // 增量指标的内部实现
+    // 门面层：决定**什么时候**推进，以及推进几步
     //
-    // *_full() 就是改动前的朴素全量重算，**原样保留并保持可达**：
-    //   - indicators == nullptr 时（手工构造 context 的测试等）直接走它；
-    //   - 序列不连续时由 rebuild_* 调用它来重建载体。
-    // 保留它还有一个好处：金标准测试可以在同一个进程里比对
-    // 「朴素 vs 增量」，而不只是比对一份离线 fixture。
+    // 递推本身住在 indicators.h。这里只回答一个问题：
+    // 「这次调用看到的 history，相对槽里已发布的那次，是原地、前进一根、
+    //   还是换了一条序列？」
+    //
+    // *_full() 是改动前的朴素全量重算，**原样保留并保持可达**：
+    //   indicators == nullptr 时（手工构造 context 的测试等）直接走它。
+    // 保留它的好处是金标准测试可以在同一个进程里比对「朴素 vs 增量」，
+    // 而不只是比对一份离线 fixture —— 两条路径必须逐位命中同一份金标准。
     // ────────────────────────────────────────────────────────
 
-    bool matches_fp(const IndicatorSlot& sl, const Bar& prev) const {
-        return sl.fp_date == prev.date && sl.fp_close == prev.close
-            && sl.fp_high == prev.high && sl.fp_low == prev.low;
-    }
-    static void stamp_fp(IndicatorSlot& sl, long long n, const Bar& last) {
-        sl.valid_size = n;
-        sl.fp_date = last.date; sl.fp_close = last.close;
-        sl.fp_high = last.high; sl.fp_low = last.low;
+    /*
+     * 把槽推进到「描述当前 history」的状态。
+     *
+     * 三种情形，对应三种代价：
+     *   已经是当前这根  → 什么都不做（ComboStrategy 的第二次调用走这里，免费）
+     *   正好差一根且连得上 → 推进一步，O(1)
+     *   其它            → reset() 后从头重放，O(N)，整场只会发生一次
+     *
+     * 最后一种看着贵，但它是**正确性的兜底**：换了标的、换了回测区间、
+     * 或者调用方自己拼了一条新序列，都必须落到这条路上，否则就是拿着
+     * 另一条序列的递推状态在算这一条。
+     */
+    template <typename Ind>
+    void advance(IndicatorSlot<Ind>& sl) const {
+        const int n = static_cast<int>(history->size());
+        if (sl.valid_size == n) return;                      // 原地，不动递推状态
+
+        if (sl.valid_size == n - 1 && n >= 2 && sl.continues((*history)[n - 2])) {
+            sl.ind.update((*history)[n - 1]);                 // 前进一根
+        } else {
+            sl.ind.reset();                                   // 换了序列 → 从头重放
+            for (int i = 0; i < n; ++i) sl.ind.update((*history)[i]);
+        }
+        sl.stamp(n, (*history)[n - 1]);
     }
 
-    // ── MACD ──
     MACDResult macd_full(int fast_period, int slow_period, int signal_period) const {
         MACDResult r;
         if (!history || static_cast<int>(history->size()) < slow_period) return r;
@@ -542,32 +515,6 @@ private:
         r.dif = dif; r.dea = dea; r.hist = 2.0 * (r.dif - r.dea);
         return r;
     }
-    static void publish_macd(IndicatorSlot& sl, int n, int slow_period,
-                             double dif, double dea, const Bar& last) {
-        if (n < slow_period) { sl.v0 = 0.0; sl.v1 = 0.0; sl.v2 = 0.0; }
-        else { sl.v0 = dif; sl.v1 = dea; sl.v2 = 2.0 * (dif - dea); }
-        stamp_fp(sl, n, last);
-    }
-    void rebuild_macd(IndicatorSlot& sl, int fast_period, int slow_period,
-                      int signal_period) const {
-        const int n = static_cast<int>(history->size());
-        const double af = 2.0 / (fast_period + 1);
-        const double as = 2.0 / (slow_period + 1);
-        const double asig = 2.0 / (signal_period + 1);
-        double ef = (*history)[0].close, es = (*history)[0].close;
-        double dif = ef - es;
-        double dea = dif;
-        for (int i = 1; i < n; ++i) {
-            const double c = (*history)[i].close;
-            ef = af * c + (1.0 - af) * ef;
-            es = as * c + (1.0 - as) * es;
-            dif = ef - es;
-            dea = asig * dif + (1.0 - asig) * dea;
-        }
-        sl.c0 = ef; sl.c1 = es; sl.c2 = dea; sl.seeded = true;
-        publish_macd(sl, n, slow_period, dif, dea, (*history)[n - 1]);
-    }
-
     // ── RSI ──
     double rsi_full(int period) const {
         if (!history || static_cast<int>(history->size()) < period + 1) return 50.0;
@@ -590,35 +537,6 @@ private:
         if (avg_loss == 0.0) return 100.0;
         return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss);
     }
-    static void step_rsi_change(IndicatorSlot& sl, int period, double ch) {
-        ++sl.c_count;
-        if (sl.c_count <= period) {
-            if (ch > 0) sl.c0 += ch; else sl.c1 += (-ch);
-            if (sl.c_count == period) { sl.c0 /= period; sl.c1 /= period; }
-        } else {
-            const double g = ch > 0 ? ch : 0.0;
-            const double l = ch < 0 ? -ch : 0.0;
-            sl.c0 = (sl.c0 * (period - 1) + g) / period;
-            sl.c1 = (sl.c1 * (period - 1) + l) / period;
-        }
-    }
-    static void publish_rsi(IndicatorSlot& sl, int n, int period, const Bar& last) {
-        if (n < period + 1) sl.v0 = 50.0;
-        else if (sl.c1 == 0.0) sl.v0 = 100.0;
-        else sl.v0 = 100.0 - 100.0 / (1.0 + sl.c0 / sl.c1);
-        stamp_fp(sl, n, last);
-    }
-    void rebuild_rsi(IndicatorSlot& sl, int period) const {
-        const int n = static_cast<int>(history->size());
-        sl.c0 = 0.0; sl.c1 = 0.0; sl.c_count = 0;
-        for (int i = 1; i < n; ++i) {
-            step_rsi_change(sl, period, (*history)[i].close - (*history)[i - 1].close);
-        }
-        sl.c2 = (*history)[n - 1].close;    // 上一根收盘价，供下次步进用
-        sl.seeded = true;
-        publish_rsi(sl, n, period, (*history)[n - 1]);
-    }
-
     // ── KDJ ──
     KDJResult kdj_full(int n, int m1, int m2) const {
         KDJResult r;
@@ -639,30 +557,6 @@ private:
         r.k = k_val; r.d = d_val; r.j = 3.0 * k_val - 2.0 * d_val;
         return r;
     }
-    // 推进一根 bar（i 是该 bar 在 history 中的下标）
-    void step_kdj(IndicatorSlot& sl, int i, int n, int m1, int m2) const {
-        double hhv = (*history)[i].high, llv = (*history)[i].low;
-        for (int j = i - n + 1; j < i; ++j) {
-            hhv = std::max(hhv, (*history)[j].high);
-            llv = std::min(llv, (*history)[j].low);
-        }
-        const double rsv = (hhv == llv) ? 50.0
-            : ((*history)[i].close - llv) / (hhv - llv) * 100.0;
-        sl.c0 = (rsv + (m1 - 1) * sl.c0) / m1;
-        sl.c1 = (sl.c0 + (m2 - 1) * sl.c1) / m2;
-    }
-    static void publish_kdj(IndicatorSlot& sl, int len, int n, const Bar& last) {
-        if (len < n) { sl.v0 = 50.0; sl.v1 = 50.0; sl.v2 = 50.0; }
-        else { sl.v0 = sl.c0; sl.v1 = sl.c1; sl.v2 = 3.0 * sl.c0 - 2.0 * sl.c1; }
-        stamp_fp(sl, len, last);
-    }
-    void rebuild_kdj(IndicatorSlot& sl, int n, int m1, int m2) const {
-        const int len = static_cast<int>(history->size());
-        sl.c0 = 50.0; sl.c1 = 50.0; sl.seeded = true;
-        for (int i = n - 1; i < len; ++i) step_kdj(sl, i, n, m1, m2);
-        publish_kdj(sl, len, n, (*history)[len - 1]);
-    }
-
 public:
 };
 

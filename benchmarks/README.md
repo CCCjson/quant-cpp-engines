@@ -473,9 +473,9 @@ into pandas scalar indexing (H5) — the classic symptom of a hot path falling b
 interpreter and object layer. Same library, and using it right versus wrong differs by
 314×.
 
-**3. Cost to write and change** — 1,431 lines vs 9,100 lines
+**3. Cost to write and change** — 1,431 lines vs 9,460 lines
 
-What the Python reference engine does in 1,431 lines, the C++ engine takes 9,100
+What the Python reference engine does in 1,431 lines, the C++ engine takes 9,460
 lines to do (the latter does more — risk management, market rules, portfolio backtesting and
 six additional strategies — so this comparison is a rough order-of-magnitude reference, not a
 like-for-like line count).
@@ -959,11 +959,11 @@ Two rows deserve to be called out:
 | **P4** | BOLLINGER's fitted log–log slope lands in 1.00–1.10 (**this strategy has never been benchmarked; the answer is genuinely unknown right now**) | ✅ hit BOLLINGER's slope is **1.0553**, inside the predicted 1.00–1.10. |
 | **P5** | MOMENTUM's fitted log–log slope lands in 1.00–1.05 (**also never measured before**) | ❌ missed MOMENTUM's slope is **1.0719**, outside the predicted 1.00–1.05. Why it missed: the prediction assumed the engine itself contributes a slope of 1.00, so an O(1) indicator should measure 1.00. In fact all six C++ strategies land in 1.045–1.078 **regardless of indicator cost** — MA_CROSS does 25 additions per bar and fits 1.0513, *lower* than MOMENTUM, whose indicator costs nothing. So ~1.05–1.08 is a floor belonging to **the engine**, not to the indicators. (Python sits at 0.995–1.007 over the same range and has no such floor.) The floor is not attributed here; the likeliest cause is the per-bar memory footprint growing with N — history and the equity curve both lengthen, and cache behaviour degrades with them. |
 | **P6** | BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured | ✅ hit BOLLINGER 5.930 ms and MOMENTUM 5.410 ms, both inside 5.0–7.0 ms and the same magnitude as the other four. |
-| **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ⏳ not yet measured<br>⚠️ This prediction was itself malformed: it pinned a ±2% tolerance to a baseline measured on a different day. Re-measuring the *unchanged* code across sessions drifts by 2.9%–6.6% (see results/machine_drift.json) — the noise is larger than the effect. It is therefore judged against a same-session baseline instead; the original wording is left untouched. |
-| **P8** | After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path | ⏳ not yet measured |
+| **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ✅ hit Judged by pairing: the pre-refactor bench binary was rebuilt (git worktree at 6e11fae) and the two binaries alternated for 15 rounds, swapping order each round. Median paired differences across six strategies land in −0.94%…+1.64%, all inside the predicted ±2%, and every sign test returns p > 0.01 — the difference is not detectable at all. ⚠️ Only the paired method can settle this. With the cross-session comparison flagged in the note, the changed strategies moved +1.7%…+3.8% while the untouched controls moved −0.9%…+2.8% — overlapping bands that say nothing. Same prediction, different comparator, and it goes from unresolvable to a clean hit.<br>⚠️ This prediction was itself malformed: it pinned a ±2% tolerance to a baseline measured on a different day. Re-measuring the *unchanged* code across sessions drifts by 2.9%–6.6% (see results/machine_drift.json) — the noise is larger than the effect. It is therefore judged against a same-session baseline instead; the original wording is left untouched. |
+| **P8** | After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path | ✅ hit The golden indicator fixture is still hit bit for bit by both the full-recompute path and the incremental path; all 11 cases pass. Four reset cases were added, three of them verified against a negative control: dropping `count_` from KdjIndicator::reset() turns them red. |
 | **P9** | The test "run two backtests in one process; the second must equal a standalone run" goes **red** before on_init() is implemented | ⏳ not yet measured |
 | **P10** | The test "two symbols in one engine sharing one strategy instance" also goes **red** before the fix (cross-symbol contamination) | ⏳ not yet measured |
-| **P11** | Deleting ema() / ema_at() turns no test red | ⏳ not yet measured |
+| **P11** | Deleting ema() / ema_at() turns no test red | ✅ hit ema() / ema_at() are gone; 106 tests stay green and the parity gate still reports 0.00e+00 across all three gated strategies. They were O(N) per bar — O(N²) over a backtest — with no callers and no tests anywhere in the repo. |
 
 **P2 is not an ordinary prediction — it is a decision rule:**
 
