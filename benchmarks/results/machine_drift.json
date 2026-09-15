@@ -1,0 +1,69 @@
+{
+  "_README": "同一份**未改动**的代码，换一天重测与旧记录的差。drift_pct = (今天 − 旧记录) / 旧记录。code_changed 恒为 false —— 这些行之间唯一的变量就是时间。这个数字是所有**跨会话**速度对比的精度上限：小于它的「提速」不成立。同时 remeasured_min 是本次会话的**同场基线**，供改动后在同一台机器、同一次会话里对比用 —— 跨天比是无效的。⚠️ 漂移未做归因（睿频/温度/后台负载/内核/页面布局都可能贡献），只量总量。由 exp_machine_drift.py 生成。",
+  "measured_at": "2026-09-16T00:29:02+08:00",
+  "recorded_source": "results/experiment_incremental_engine.json",
+  "config": {
+    "bars": 25000,
+    "warmup": 3,
+    "runs": 10,
+    "repeats": 3
+  },
+  "max_abs_drift_pct": 6.592906594097792,
+  "min_abs_drift_pct": 2.925699548678251,
+  "results": [
+    {
+      "strategy": "MA_CROSS",
+      "recorded_min": 0.005540667,
+      "remeasured_min": 0.005905958,
+      "remeasured_worst": 0.006019709,
+      "drift_pct": 6.592906594097792,
+      "drift_pct_worst": 8.6459265644371,
+      "code_changed": false
+    },
+    {
+      "strategy": "MACD",
+      "recorded_min": 0.005737959,
+      "remeasured_min": 0.005914917,
+      "remeasured_worst": 0.005993083,
+      "drift_pct": 3.0839885750316487,
+      "drift_pct_worst": 4.446249964490856,
+      "code_changed": false
+    },
+    {
+      "strategy": "RSI",
+      "recorded_min": 0.005550084,
+      "remeasured_min": 0.005802209,
+      "remeasured_worst": 0.005828292,
+      "drift_pct": 4.542724038050583,
+      "drift_pct_worst": 5.0126808891540975,
+      "code_changed": false
+    },
+    {
+      "strategy": "KDJ",
+      "recorded_min": 0.00581625,
+      "remeasured_min": 0.005986416,
+      "remeasured_worst": 0.006101875,
+      "drift_pct": 2.925699548678251,
+      "drift_pct_worst": 4.910810229959162,
+      "code_changed": false
+    },
+    {
+      "strategy": "BOLLINGER",
+      "recorded_min": null,
+      "remeasured_min": 0.005929875,
+      "remeasured_worst": 0.0059875,
+      "drift_pct": null,
+      "drift_pct_worst": null,
+      "code_changed": false
+    },
+    {
+      "strategy": "MOMENTUM",
+      "recorded_min": null,
+      "remeasured_min": 0.005409834,
+      "remeasured_worst": 0.005619042,
+      "drift_pct": null,
+      "drift_pct_worst": null,
+      "code_changed": false
+    }
+  ]
+}

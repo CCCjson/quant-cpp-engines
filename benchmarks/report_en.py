@@ -714,6 +714,8 @@ They are all committed now:
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `indicator_profile.json` | [`exp_indicator_profile.py`](exp_indicator_profile.py) |
+| `machine_drift.json` | [`exp_machine_drift.py`](exp_machine_drift.py) |
 | `prereg_{prereg['registered_at']}.json` | **deliberately none** — see [round four](#round-four-predict-first-then-touch-the-code) |
 
 That last row is the one exception. A pre-registration records **predictions**, not
@@ -990,6 +992,78 @@ Two rows deserve to be called out:
 In other words, this round accepts up front that the answer may be "having looked, don't change
 it." That is what "only change what the profile shows is hot" actually costs — otherwise the
 sentence is just a justification applied after the change was already made.
+
+### The profile: are the indicators still the hot spot?
+
+"Only change what the profile shows is hot" — so, profile it.
+
+⛔ **Not by timing the indicator in an isolated loop.** That measures the cost with the data
+sitting in L1; a real backtest interleaves portfolio valuation, matching and calendar
+advancement, which evict those bars. An isolated timing is a lower bound, not a fact.
+
+Instead, the control-arm method this repository already uses: the *same* backtest, with the
+`ctx.macd()`-style call replaced by "index into a precomputed array," and every other line
+untouched. The two arms' trade counts and final equity are **bit-identical**, so the time
+difference is the indicator and nothing else.
+
+> **The second dead end is worth recording too.** The first version ran each arm in its own
+> process and subtracted. All six strategies came out **inside the noise**, and `RSI` and
+> `MOMENTUM` measured a **negative** indicator cost — the control arm does strictly less work
+> and cannot be slower. Process-level jitter was larger than the effect; that whole version was
+> discarded.
+>
+> What runs now is **paired, interleaved, in one process**: each round times A and B back to
+> back for one difference, so common-mode drift cancels. Each round also swaps the order, so
+> "whoever runs first pays for cache warm-up" cannot favour one arm systematically. The verdict
+> does not rest on whether the percentage looks good — it rests on a **sign test**: 21 rounds
+> all positive has a 4.8e-07 chance of being luck.
+
+{profile_table('en')}
+
+Three things:
+
+1. **The indicators are no longer the hot spot.** Every measurable share falls between
+   {profile_min_share:.1f}% and {profile_max_share:.1f}%, far below the 15% ceiling that was
+   pre-registered. Once the previous round removed the O(N²), the headroom left in indicator
+   optimisation was capped right there.
+2. **All three `MOMENTUM` rows come out "not measurable" — and that is the method checking
+   itself.** `returns()` is already O(1) (class B in the table above), so its cost *should* be
+   zero; the sign test returns 9/21, 8/21, 10/21 — a coin flip. A quantity known to be zero
+   measuring as zero is what says the paired method has no systematic bias.
+3. **P2's decision rule therefore fires: the monotonic deque is not built.** The KDJ indicator
+   *as a whole* — window scan included — is only
+   {next(r['indicator_share'] for r in profile['results'] if r['strategy'] == 'KDJ' and r['bars'] == 25000) * 100:.1f}%
+   of the backtest. Optimising a fraction of that lands below measurement resolution. The
+   pre-registration said "under 10% means don't build it," so it does not get built. That is
+   what "only change what the profile shows is hot" actually costs.
+
+### An unanticipated finding: cross-session drift is larger than the effect
+
+P7 set the tolerance for the interface refactor at "within ±2% of the pre-change timings,"
+taking the baseline from a record made a few days earlier. Before touching anything, that
+baseline was checked:
+
+{drift_table('en')}
+
+**Same code, not one byte changed, and it drifts {drift_lo:.1f}%–{drift_hi:.1f}% between
+sessions.** (One run in the process reported `MA_CROSS` at +30.4%; the machine was busy for
+that pass and the three that followed all came back under 10%, so that figure is an outlier,
+not a finding.)
+
+Which means P7's ±2% **cannot be satisfied**, however clean the refactor is. The
+pre-registration exposed its own flaw: **it pinned a tolerance to a baseline from another day.**
+The wording stays exactly as written; what changes is that it will be judged against a
+**same-session** baseline instead — the `remeasured_min` column above.
+
+The number is worth publishing on its own: it is the precision ceiling for every cross-session
+speed comparison on this machine. **A "speedup" smaller than {drift_hi:.1f}% does not hold up
+across sessions.**
+
+> A contrast worth noting: absolute timings drifted {drift_lo:.1f}%–{drift_hi:.1f}%, while the
+> log–log slopes fitted from the same data moved by only **±0.015** across sessions
+> (`MA_CROSS` 1.0656→1.0513, `MACD (before the fix)` 1.9696→1.9691).
+> **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
+> this machine was doing today, the slope measures the order of the algorithm.
 
 ### About that parity-gate probe
 

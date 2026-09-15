@@ -31,9 +31,11 @@
 #include "backtest/engine.h"
 #include "backtest/strategy_base.h"
 #include "backtest/types.h"
+#include "strategies/bollinger_strategy.h"
 #include "strategies/kdj_strategy.h"
 #include "strategies/ma_cross_strategy.h"
 #include "strategies/macd_strategy.h"
+#include "strategies/momentum_strategy.h"
 #include "strategies/rsi_strategy.h"
 
 using json = nlohmann::json;
@@ -286,15 +288,258 @@ private:
     bool initialized_ = false;
 };
 
-std::unique_ptr<IStrategy> make_strategy(const std::string& name) {
+/*
+ * ============================================================
+ *  剖析对照臂：指标预先算好，其余一律不动
+ * ============================================================
+ *
+ * 要回答的问题是「指标计算占整场回测的百分之几」。
+ *
+ * ⛔ 不用「把指标单拎出来跑一个循环计时」那种办法。那样测出来的是
+ *    **数据全在 L1 里**的理想成本，而回测中间还夹着组合估值、撮合、
+ *    日历推进，会把指标要读的 bar 挤出缓存。孤立计时给的是下界，不是事实。
+ *
+ * 改用这个仓库已经在用的对照臂手法：跑**同一场回测**，只把
+ * `ctx.macd()` 这类调用换成「从预先算好的数组里取第 bar_index 个」，
+ * 其余每一行都不动。两条臂的成交笔数与最终净值必须**逐位相同** ——
+ * 相同才说明工作量一致，时间差才真的只是指标那部分。
+ *
+ * 预计算走的是引擎自己的增量路径，逐根推进，与回测里看到的序列完全一致；
+ * 它在**计时区间之外**做一次，O(N)。
+ *
+ * ⚠️ 一个诚实的偏差方向：对照臂每根 bar 还要读一次数组，多摸一条缓存线。
+ *    所以它测出来的指标占比是**略微偏低**的估计。对「占比 < 15%」这种
+ *    上界断言来说，偏低意味着结论偏宽松 —— 这一点在 README 里写明。
+ */
+struct PrecomputedSeries {
+    std::vector<double> a, b, c;    // 指标的 1–3 个分量
+};
+
+PrecomputedSeries precompute(const std::vector<Bar>& bars, const std::string& kind) {
+    PrecomputedSeries s;
+    const size_t n = bars.size();
+    s.a.assign(n, 0.0); s.b.assign(n, 0.0); s.c.assign(n, 0.0);
+
+    std::vector<Bar> hist;
+    hist.reserve(n);
+    IndicatorState istate;
+
+    for (size_t i = 0; i < n; ++i) {
+        hist.push_back(bars[i]);
+        StrategyContext ctx;
+        ctx.symbol = "TEST.SH";
+        ctx.bar_index = static_cast<int>(i);
+        ctx.current_bar = bars[i];
+        ctx.history = &hist;
+        ctx.indicators = &istate;
+
+        if (kind == "MA_CROSS") {
+            s.a[i] = ctx.sma(5); s.b[i] = ctx.sma(20);
+        } else if (kind == "MACD") {
+            const auto m = ctx.macd(12, 26, 9); s.a[i] = m.dif; s.b[i] = m.dea;
+        } else if (kind == "RSI") {
+            s.a[i] = ctx.rsi(14);
+        } else if (kind == "KDJ") {
+            const auto k = ctx.kdj(9, 3, 3); s.a[i] = k.k; s.b[i] = k.d;
+        } else if (kind == "BOLLINGER") {
+            const auto b = ctx.bollinger(20, 2.0);
+            s.a[i] = b.upper; s.b[i] = b.middle; s.c[i] = b.lower;
+        } else if (kind == "MOMENTUM") {
+            s.a[i] = ctx.returns(20);
+        }
+    }
+    return s;
+}
+
+/* 下面六个类逐行照抄各自的真实 on_bar，只把指标调用换成数组下标。 */
+
+class PrecompMACross : public IStrategy {
+public:
+    explicit PrecompMACross(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "MA_CROSS_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：sma 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 20) return orders;
+        const double fast_ma = p_->a[ctx.bar_index], slow_ma = p_->b[ctx.bar_index];
+        if (prev_fast_ == 0.0 && prev_slow_ == 0.0) {
+            prev_fast_ = fast_ma; prev_slow_ = slow_ma; return orders;
+        }
+        const bool golden = (prev_fast_ <= prev_slow_) && (fast_ma > slow_ma);
+        const bool death  = (prev_fast_ >= prev_slow_) && (fast_ma < slow_ma);
+        if (golden && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (death && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_fast_ = fast_ma; prev_slow_ = slow_ma;
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+    double prev_fast_ = 0.0, prev_slow_ = 0.0;
+};
+
+class PrecompMACD : public IStrategy {
+public:
+    explicit PrecompMACD(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "MACD_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：macd 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 26 + 9) return orders;
+        const double dif = p_->a[ctx.bar_index], dea = p_->b[ctx.bar_index];
+        if (!initialized_) { prev_dif_ = dif; prev_dea_ = dea; initialized_ = true; return orders; }
+        const bool golden = (prev_dif_ <= prev_dea_) && (dif > dea);
+        const bool death  = (prev_dif_ >= prev_dea_) && (dif < dea);
+        if (golden && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (death && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_dif_ = dif; prev_dea_ = dea;
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+    double prev_dif_ = 0.0, prev_dea_ = 0.0;
+    bool initialized_ = false;
+};
+
+class PrecompRSI : public IStrategy {
+public:
+    explicit PrecompRSI(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "RSI_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：rsi 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 14 + 1) return orders;
+        const double rsi = p_->a[ctx.bar_index];
+        const bool bounce = (prev_rsi_ < 30.0) && (rsi >= 30.0);
+        const bool drop   = (prev_rsi_ > 70.0) && (rsi <= 70.0);
+        if (bounce && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (drop && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_rsi_ = rsi;
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+    double prev_rsi_ = 50.0;
+};
+
+class PrecompKDJ : public IStrategy {
+public:
+    explicit PrecompKDJ(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "KDJ_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：kdj 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 9) return orders;
+        const double k = p_->a[ctx.bar_index], d = p_->b[ctx.bar_index];
+        if (!initialized_) { prev_k_ = k; prev_d_ = d; initialized_ = true; return orders; }
+        const bool golden = (prev_k_ <= prev_d_) && (k > d) && (k < 20.0);
+        const bool death  = (prev_k_ >= prev_d_) && (k < d) && (k > 80.0);
+        if (golden && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (death && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_k_ = k; prev_d_ = d;
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+    double prev_k_ = 50.0, prev_d_ = 50.0;
+    bool initialized_ = false;
+};
+
+class PrecompBollinger : public IStrategy {
+public:
+    explicit PrecompBollinger(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "BOLLINGER_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：bollinger 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 20) return orders;
+        const double upper = p_->a[ctx.bar_index], lower = p_->c[ctx.bar_index];
+        const double close = ctx.current_bar.close;
+        const bool bounce = (prev_close_ <= prev_lower_ && prev_lower_ > 0) && (close > lower);
+        const bool drop   = (prev_close_ >= prev_upper_ && prev_upper_ > 0) && (close < upper);
+        if (bounce && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (drop && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        prev_close_ = close; prev_lower_ = lower; prev_upper_ = upper;
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+    double prev_close_ = 0.0, prev_lower_ = 0.0, prev_upper_ = 0.0;
+};
+
+class PrecompMomentum : public IStrategy {
+public:
+    explicit PrecompMomentum(const PrecomputedSeries* p) : p_(p) {}
+    std::string name() const override { return "MOMENTUM_PRECOMP"; }
+    std::string description() const override { return "剖析对照臂：returns 预算好"; }
+    std::vector<Order> on_bar(const StrategyContext& ctx) override {
+        std::vector<Order> orders;
+        if (ctx.bar_index < 20) return orders;
+        const double momentum = p_->a[ctx.bar_index];
+        if (momentum > 0.05 && !ctx.has_position()) {
+            const int qty = ctx.lot_floor(ctx.cash * 0.95 / ctx.current_bar.close);
+            if (qty > 0) orders.push_back(Order::market_buy(ctx.symbol, qty));
+        } else if (momentum < -0.03 && ctx.has_position()) {
+            orders.push_back(Order::market_sell(ctx.symbol, ctx.position_quantity));
+        }
+        return orders;
+    }
+private:
+    const PrecomputedSeries* p_;
+};
+
+/*
+ * 剖析臂的名字 → 它需要预算哪个指标。
+ * 返回空串表示这条臂不需要预计算。
+ */
+std::string precompute_kind_for(const std::string& name) {
+    const std::string suffix = "_PRECOMP";
+    if (name.size() > suffix.size() &&
+        name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        return name.substr(0, name.size() - suffix.size());
+    }
+    return "";
+}
+
+std::unique_ptr<IStrategy> make_strategy(const std::string& name,
+                                         const PrecomputedSeries* pre) {
     // 参数与 Python 参照引擎的默认值一一对应（见 benchmarks/bench.py）
     if (name == "MA_CROSS") return std::make_unique<MACrossStrategy>(5, 20, 0.95);
     if (name == "MACD")     return std::make_unique<MACDStrategy>(12, 26, 9, 0.95);
     if (name == "RSI")      return std::make_unique<RSIStrategy>(14, 30.0, 70.0, 0.95);
     if (name == "KDJ")      return std::make_unique<KDJStrategy>(9, 3, 3, 20.0, 80.0, 0.95);
+    // 这两个策略此前从未进过 benchmark —— 加进来是为了拟合它们的复杂度阶数
+    // （预注册 P4/P5）。参数取 server.cpp 里的默认值。
+    if (name == "BOLLINGER") return std::make_unique<BollingerStrategy>(20, 2.0, 0.95);
+    if (name == "MOMENTUM")  return std::make_unique<MomentumStrategy>(20, 0.05, -0.03, 0.95);
     if (name == "MACD_NAIVE")       return std::make_unique<NaiveMACDStrategy>(12, 26, 9, 0.95);
     if (name == "MACD_INCREMENTAL") return std::make_unique<IncrementalMACDStrategy>(12, 26, 9, 0.95);
     if (name == "MACD_NOALLOC")     return std::make_unique<NoAllocMACDStrategy>(12, 26, 9, 0.95);
+    if (name == "MA_CROSS_PRECOMP")  return std::make_unique<PrecompMACross>(pre);
+    if (name == "MACD_PRECOMP")      return std::make_unique<PrecompMACD>(pre);
+    if (name == "RSI_PRECOMP")       return std::make_unique<PrecompRSI>(pre);
+    if (name == "KDJ_PRECOMP")       return std::make_unique<PrecompKDJ>(pre);
+    if (name == "BOLLINGER_PRECOMP") return std::make_unique<PrecompBollinger>(pre);
+    if (name == "MOMENTUM_PRECOMP")  return std::make_unique<PrecompMomentum>(pre);
     return nullptr;
 }
 
@@ -307,14 +552,14 @@ std::unique_ptr<IStrategy> make_strategy(const std::string& name) {
  *    两边必须对称，否则就是在比较不同的工作量。
  */
 double run_once(const std::vector<Bar>& bars, const std::string& strategy_name,
-                BacktestResult* out) {
+                const PrecomputedSeries* pre, BacktestResult* out) {
     auto t0 = std::chrono::steady_clock::now();
 
     BacktestEngine engine(1'000'000.0,
                           CommissionConfig::a_share(),
                           RiskConfig{},                 // 风控默认关闭，与 Python 侧对齐
                           MarketRules::a_share());
-    engine.set_strategy(make_strategy(strategy_name));
+    engine.set_strategy(make_strategy(strategy_name, pre));
     engine.load_data("TEST.SH", bars);                  // 拷贝一份，与 Python 的 data.copy() 对称
     BacktestResult result = engine.run();
 
@@ -323,12 +568,96 @@ double run_once(const std::vector<Bar>& bars, const std::string& strategy_name,
     return std::chrono::duration<double>(t1 - t0).count();
 }
 
+/*
+ * ============================================================
+ *  PAIR 模式：同进程内交替测两条臂，报配对差
+ * ============================================================
+ *
+ * 为什么非要这样测：
+ *
+ * 第一版是分两次进程各测各的，然后相减。结果六个策略全部落在噪声里，
+ * 其中 RSI 与 MOMENTUM 甚至测出**负的**指标成本 —— 对照臂做的事严格更少，
+ * 不可能更慢。也就是说，进程级的抖动（地址布局、CPU 迁移、睿频与热节流）
+ * 比要测的差值还大，那种数字一个都不能用。
+ *
+ * 配对测量把它消掉：同一个进程里交替跑 A、B，每一轮得到一个差
+ *     d_i = t(A, 第 i 轮) − t(B, 第 i 轮)
+ * 共模的漂移在相减时抵消，剩下的才是两条臂的真实差别。
+ *
+ * ⚠️ 每一轮还要**交换先后顺序**（偶数轮 A→B，奇数轮 B→A）。
+ *    不换的话，「先跑的那个要承担缓存预热」会固定偏向其中一条臂，
+ *    那就把顺序效应当成指标成本量进去了。
+ *
+ * 报告用的是 d 的**中位数**（抗离群点）外加**符号检验**：
+ * 若指标成本真的存在，d_i 应当几乎全为正。25 轮全正的话，
+ * 纯属偶然的概率是 2^-25 ≈ 3e-8 —— 这比任何「占比 X%」都更能说明问题。
+ */
+int run_pair_mode(const std::vector<Bar>& bars, const std::string& base,
+                  int warmup, int runs) {
+    const std::string arm_a = base;                 // 真实臂：正常调用指标
+    const std::string arm_b = base + "_PRECOMP";    // 对照臂：指标预算好
+
+    if (!make_strategy(arm_a, nullptr) || !make_strategy(arm_b, nullptr)) {
+        std::cerr << "PAIR 模式：未知策略 " << base << "\n";
+        return 1;
+    }
+
+    PrecomputedSeries pre = precompute(bars, base);   // 计时区间之外，只做一次
+
+    for (int i = 0; i < warmup; ++i) {
+        run_once(bars, arm_a, nullptr, nullptr);
+        run_once(bars, arm_b, &pre, nullptr);
+    }
+
+    BacktestResult last_a, last_b;
+    std::vector<double> sa, sb, diffs;
+    sa.reserve(runs); sb.reserve(runs); diffs.reserve(runs);
+
+    for (int i = 0; i < runs; ++i) {
+        double ta, tb;
+        if (i % 2 == 0) {                 // 交换先后，消掉顺序效应
+            ta = run_once(bars, arm_a, nullptr, &last_a);
+            tb = run_once(bars, arm_b, &pre, &last_b);
+        } else {
+            tb = run_once(bars, arm_b, &pre, &last_b);
+            ta = run_once(bars, arm_a, nullptr, &last_a);
+        }
+        sa.push_back(ta);
+        sb.push_back(tb);
+        diffs.push_back(ta - tb);
+    }
+
+    int positive = 0;
+    for (double d : diffs) if (d > 0.0) ++positive;
+
+    json out;
+    out["mode"] = "pair";
+    out["strategy"] = base;
+    out["bars"] = static_cast<int>(bars.size());
+    out["samples_with_indicator"] = sa;
+    out["samples_precomputed"] = sb;
+    out["paired_diffs"] = diffs;
+    out["positive_diffs"] = positive;
+    out["pairs"] = runs;
+    // 两条臂必须在做同一件事，否则时间差没有意义
+    out["trades_with_indicator"] = static_cast<int>(last_a.trades.size());
+    out["trades_precomputed"] = static_cast<int>(last_b.trades.size());
+    out["final_value_with_indicator"] = last_a.metrics.final_value;
+    out["final_value_precomputed"] = last_b.metrics.final_value;
+
+    std::cout << out.dump() << std::endl;
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "用法: " << argv[0] << " <bars.json> <STRATEGY> [warmup] [runs]\n";
-        std::cerr << "策略: MA_CROSS | MACD | RSI | KDJ | MACD_NAIVE | MACD_INCREMENTAL | MACD_NOALLOC\n";
+        std::cerr << "策略: MA_CROSS | MACD | RSI | KDJ | BOLLINGER | MOMENTUM\n"
+                 "      MACD_NAIVE | MACD_INCREMENTAL | MACD_NOALLOC\n"
+                 "      <名字>_PRECOMP —— 剖析对照臂，指标预算好，其余不动\n"
+                 "      PAIR:<名字>   —— 同进程交替测真实臂与对照臂，报配对差\n";
         return 1;
     }
 
@@ -337,7 +666,9 @@ int main(int argc, char* argv[]) {
     const int warmup = argc > 3 ? std::atoi(argv[3]) : 3;
     const int runs   = argc > 4 ? std::atoi(argv[4]) : 10;
 
-    if (!make_strategy(strategy_name)) {
+    const bool pair_mode = strategy_name.rfind("PAIR:", 0) == 0;
+
+    if (!pair_mode && !make_strategy(strategy_name, nullptr)) {
         std::cerr << "未知策略: " << strategy_name << "\n";
         return 1;
     }
@@ -355,13 +686,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (pair_mode) {
+        return run_pair_mode(bars, strategy_name.substr(5), warmup, runs);
+    }
+
+    /*
+     * 剖析对照臂的预计算 —— **必须在计时区间之外**。
+     * 它本身是 O(N) 的一遍扫描；放进计时里就等于把指标成本又算了一次，
+     * 对照臂的全部意义就没了。
+     */
+    std::unique_ptr<PrecomputedSeries> pre;
+    const std::string kind = precompute_kind_for(strategy_name);
+    if (!kind.empty()) pre = std::make_unique<PrecomputedSeries>(precompute(bars, kind));
+
     // 预热：让分支预测器/分配器进入稳态，也把首次页错误挡在计时之外
-    for (int i = 0; i < warmup; ++i) run_once(bars, strategy_name, nullptr);
+    for (int i = 0; i < warmup; ++i) run_once(bars, strategy_name, pre.get(), nullptr);
 
     BacktestResult last;
     std::vector<double> samples;
     samples.reserve(runs);
-    for (int i = 0; i < runs; ++i) samples.push_back(run_once(bars, strategy_name, &last));
+    for (int i = 0; i < runs; ++i)
+        samples.push_back(run_once(bars, strategy_name, pre.get(), &last));
 
     json out;
     out["engine"] = "cpp";

@@ -86,8 +86,10 @@ def main() -> int:
         print(f"找不到 {BENCH}，请先跑 ./build.sh", file=sys.stderr)
         return 1
 
+    # BOLLINGER 与 MOMENTUM 此前从未进过 benchmark —— 加进来是为了拟合它们的
+    # 复杂度阶数（预注册 P4/P5，写在 results/prereg_2026-09-16.json 里）。
     arms = ["MACD_NAIVE", "MACD_NOALLOC", "MACD_INCREMENTAL",
-            "MA_CROSS", "MACD", "RSI", "KDJ"]
+            "MA_CROSS", "MACD", "RSI", "KDJ", "BOLLINGER", "MOMENTUM"]
     measured: dict[int, dict[str, dict]] = {}
     for n in SIZES:
         bars = ensure_data(n)
@@ -157,7 +159,9 @@ def main() -> int:
                        ("C++/MACD（引擎当前）", "MACD"),
                        ("C++/MA_CROSS", "MA_CROSS"),
                        ("C++/RSI（引擎当前）", "RSI"),
-                       ("C++/KDJ（引擎当前）", "KDJ")]:
+                       ("C++/KDJ（引擎当前）", "KDJ"),
+                       ("C++/BOLLINGER", "BOLLINGER"),
+                       ("C++/MOMENTUM", "MOMENTUM")]:
         fit[label] = loglog_slope(SIZES, [measured[n][arm]["min"] for n in SIZES])
 
     bt_path = RESULTS / "backtest.json"

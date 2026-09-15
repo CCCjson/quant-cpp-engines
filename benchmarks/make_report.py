@@ -47,6 +47,58 @@ inc_engine = load("experiment_incremental_engine.json")
 # 但文字还在说命中」这种情况，因为两边都来自同一个文件。
 # ────────────────────────────────────────────────────────────
 prereg = load("prereg_2026-09-16.json")
+profile = load("indicator_profile.json")
+drift = load("machine_drift.json")
+
+
+def profile_table(lang="zh"):
+    """剖析结果：指标占整场回测多少。测不出来的行如实标出来，不给数字。"""
+    if lang == "zh":
+        head = ("| 规模 | 策略 | 整场 (ms) | 指标 (ms) | 占比 | 正号 | 符号检验 p | 判定 |\n"
+                "|---|---|---|---|---|---|---|---|")
+    else:
+        head = ("| Bars | Strategy | Whole backtest (ms) | Indicator (ms) | Share | "
+                "Positive | Sign-test p | Verdict |\n|---|---|---|---|---|---|---|---|")
+    rows = []
+    for r in profile["results"]:
+        if not r["economics_identical"]:
+            v = "❌ 两臂工作量不一致" if lang == "zh" else "❌ arms not equivalent"
+        elif r["inconclusive"]:
+            v = "⚠️ 测不出来" if lang == "zh" else "⚠️ not measurable"
+        else:
+            v = "✅"
+        share = "—" if r["inconclusive"] else f"{r['indicator_share'] * 100:.1f}%"
+        rows.append(
+            f"| {r['bars']:,} | `{r['strategy']}` | {r['total_min'] * 1000:.3f} "
+            f"| {r['median_paired_diff'] * 1000:.3f} | {share} "
+            f"| {r['positive_diffs']}/{r['pairs']} | {r['sign_p']:.1e} | {v} |")
+    return head + "\n" + "\n".join(rows)
+
+
+def drift_table(lang="zh"):
+    if lang == "zh":
+        head = ("| 策略 | 旧记录 (ms) | 今天重测 (ms) | 漂移 | 代码改动 |\n"
+                "|---|---|---|---|---|")
+    else:
+        head = ("| Strategy | Earlier record (ms) | Re-measured today (ms) | Drift | "
+                "Code changed |\n|---|---|---|---|---|")
+    rows = []
+    for r in drift["results"]:
+        old = f"{r['recorded_min'] * 1000:.3f}" if r["recorded_min"] else "—"
+        d = f"**{r['drift_pct']:+.1f}%**" if r["drift_pct"] is not None else "—"
+        never = "从未测过" if lang == "zh" else "never measured before"
+        no = "**否**" if lang == "zh" else "**no**"
+        rows.append(f"| `{r['strategy']}` | {old if r['recorded_min'] else never} "
+                    f"| {r['remeasured_min'] * 1000:.3f} | {d} | {no} |")
+    return head + "\n" + "\n".join(rows)
+
+
+# 剖析里能测出来的最大占比 —— 现算，不写死
+_measurable = [r for r in profile["results"] if not r["inconclusive"]]
+profile_max_share = max(r["indicator_share"] for r in _measurable) * 100
+profile_min_share = min(r["indicator_share"] for r in _measurable) * 100
+drift_lo = drift["min_abs_drift_pct"]
+drift_hi = drift["max_abs_drift_pct"]
 
 
 def _prereg_rows(items, cols):
@@ -59,10 +111,17 @@ def _prereg_rows(items, cols):
 
 def _measured_cell(p, lang="zh"):
     m = p.get("measured")
+    note_key = "note" if lang == "zh" else "note_en"
+    # 注记记的是「这条预测本身有什么毛病」，即便还没测也要显示出来 ——
+    # 藏起来就等于事后悄悄改预测。
+    note = p.get(note_key, "")
     if m is None:
-        return "⏳ 待回填" if lang == "zh" else "⏳ not yet measured"
+        pending = "⏳ 待回填" if lang == "zh" else "⏳ not yet measured"
+        return f"{pending}<br>{note}" if note else pending
     key = "detail" if lang == "zh" else "detail_en"
-    return f"{m.get('verdict', '')} {m.get(key, m.get('detail', ''))}".strip()
+    vkey = "verdict" if lang == "zh" else "verdict_en"
+    cell = f"{m.get(vkey, m.get('verdict', ''))} {m.get(key, m.get('detail', ''))}".strip()
+    return f"{cell}<br>{note}" if note else cell
 
 
 def prereg_class_table(lang="zh"):
@@ -839,6 +898,8 @@ harness 不同的 before/after 不可比，这一点比多报一个倍数重要�
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `indicator_profile.json` | [`exp_indicator_profile.py`](exp_indicator_profile.py) |
+| `machine_drift.json` | [`exp_machine_drift.py`](exp_machine_drift.py) |
 | `prereg_{prereg['registered_at']}.json` | **刻意没有** —— 见[第四轮](#第四轮先预测再动手) |
 
 唯一的例外是最后一行。预注册文件记的是**预测**，不是测量：
@@ -1076,6 +1137,66 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 
 也就是说，本轮预先接受了「查完发现不该改，那就不改」这个结果。
 这是「只改热点」的字面执行 —— 否则那句话只是事后给已经做了的改动找的理由。
+
+### 剖析：指标还是不是热点
+
+「只改剖析显示是热点的东西」——那就先剖析。
+
+⛔ **没用「把指标单拎出来跑个循环」那种测法。** 那测的是数据全在 L1 里的理想成本；
+真实回测中间夹着组合估值、撮合、日历推进，会把 bar 挤出缓存。孤立计时给的是下界。
+
+用的是这个仓库已有的对照臂手法：同一场回测，只把 `ctx.macd()` 这类调用换成
+「从预先算好的数组里取第 `bar_index` 个」，其余每一行不动。
+两条臂的成交笔数与最终净值**逐位相同**，时间差才只剩指标那一部分。
+
+> **第二条走不通的路，也记下来。** 最初是两条臂分两次进程各测各的再相减。
+> 结果六个策略**全部落在噪声里**，其中 `RSI` 与 `MOMENTUM` 测出**负的**指标成本 ——
+> 对照臂做的事严格更少，不可能更慢。进程级抖动比要测的差值还大，那版数字全部作废。
+>
+> 现在是**同进程内交替配对**：每轮跑 A、B 各一次得到一个差，共模漂移相减抵消；
+> 每轮还交换先后，免得「先跑的承担缓存预热」固定偏袒某一条臂。
+> 判据不看占比好不好看，看**符号检验**：21 轮全正，纯属偶然的概率是 4.8e-07。
+
+{profile_table('zh')}
+
+三件事：
+
+1. **指标已经不是热点了。** 能测出来的占比全部落在
+   {profile_min_share:.1f}%–{profile_max_share:.1f}%，远低于预注册的 15% 上限。
+   上一轮把 O(N²) 消掉之后，继续优化指标的收益上限就被钉死在这个区间里了。
+2. **`MOMENTUM` 三行全部「测不出来」，而这正是方法本身的验算。**
+   `returns()` 本来就是 O(1)（归类表里的 B 类），成本就该是零；
+   符号检验给出 9/21、8/21、10/21 —— 标准的抛硬币。
+   一个已知为零的量被测成零，说明这套配对测法没有系统性偏袒。
+3. **P2 的决策规则因此生效：单调队列不做。** KDJ 的指标**整体**（含窗口扫描）
+   只占 {next(r['indicator_share'] for r in profile['results'] if r['strategy'] == 'KDJ' and r['bars'] == 25000) * 100:.1f}%，
+   把其中一部分再优化掉，对整场回测的影响进不了测量精度。
+   预注册当初就写明了「若 < 10% 则不做」，那就不做 —— 这是「只改热点」这句话
+   真正要付的代价。
+
+### 一个没预料到的发现：跨会话漂移比要测的效应还大
+
+预注册 P7 给接口重构定的容差是「落在改动前的 ±2% 以内」，
+基线取自几天前的记录。动手前先验了一下这个基线还成不成立：
+
+{drift_table('zh')}
+
+**同一份代码，一个字节没改，跨会话就漂 {drift_lo:.1f}%–{drift_hi:.1f}%。**
+（过程中还撞见过一次 `MA_CROSS` 报 +30.4% —— 那遍机器正被占用，
+紧接着三遍都回到 10% 以内，所以那是离群点，不是结论。）
+
+于是 P7 那条 ±2% **根本不可能被满足**，无论重构做得多干净。这是预注册自己
+暴露出来的毛病：**它把容差钉在了另一天的基线上。** 原文一个字不改地留着，
+判定改为与**同一次会话**的基线比 —— 上表 `remeasured_min` 那一列就是。
+
+这个数字本身值得公开：它是这台机器上所有跨会话速度对比的精度上限。
+**小于 {drift_hi:.1f}% 的「提速」，在跨会话口径下不成立。**
+
+> 顺带一个反差：绝对耗时漂了 {drift_lo:.1f}%–{drift_hi:.1f}%，
+> 而同一批数据拟合出的 log–log 斜率跨会话只差 **±0.015**
+> （`MA_CROSS` 1.0656→1.0513，`MACD（改动前）` 1.9696→1.9691）。
+> **这正是斜率比倍数更值得信的原因**：倍数量的是这台机器今天的状态，
+> 斜率量的是算法的阶数。
 
 ### 关于 parity 门禁的那次预探
 

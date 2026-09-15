@@ -132,12 +132,14 @@ gives the order directly: `t ∝ N^k` → `log t = k·log N + c`.
 
 | Engine | Strategy | Fitted slope k | Verdict |
 |---|---|---|---|
-| C++ | `KDJ (engine now)` | **1.072** | **O(N)** linear |
-| C++ | `MACD (incremental prototype)` | **1.062** | **O(N)** linear |
-| C++ | `MACD (engine now)` | **1.054** | **O(N)** linear |
-| C++ | `MACD (before the fix, O(N²))` | **1.970** | **O(N²)** quadratic |
-| C++ | `MA_CROSS` | **1.066** | **O(N)** linear |
-| C++ | `RSI (engine now)` | **1.052** | **O(N)** linear |
+| C++ | `BOLLINGER` | **1.055** | **O(N)** linear |
+| C++ | `KDJ (engine now)` | **1.078** | **O(N)** linear |
+| C++ | `MACD (incremental prototype)` | **1.058** | **O(N)** linear |
+| C++ | `MACD (engine now)` | **1.055** | **O(N)** linear |
+| C++ | `MACD (before the fix, O(N²))` | **1.969** | **O(N²)** quadratic |
+| C++ | `MA_CROSS` | **1.051** | **O(N)** linear |
+| C++ | `MOMENTUM` | **1.072** | **O(N)** linear |
+| C++ | `RSI (engine now)` | **1.045** | **O(N)** linear |
 | Python | `KDJ` | **0.999** | **O(N)** linear |
 | Python | `MACD` | **1.007** | **O(N)** linear |
 | Python | `MA_CROSS` | **1.001** | **O(N)** linear |
@@ -174,19 +176,19 @@ is that the EMA state is carried forward, making each bar O(1) with zero heap al
 
 | Bars | Original O(N²) | Incremental O(N) | Speedup | Result check |
 |---|---|---|---|---|
-| 250 | 0.175 | 0.044 | **4.0×** | ✅ bit-identical |
-| 1,000 | 2.270 | 0.179 | **12.7×** | ✅ bit-identical |
-| 2,500 | 14.533 | 0.495 | **29.4×** | ✅ bit-identical |
-| 10,000 | 239.307 | 2.051 | **116.7×** | ✅ bit-identical |
-| 25,000 | 1,444.018 | 5.866 | **246.2×** | ✅ bit-identical |
+| 250 | 0.188 | 0.047 | **4.0×** | ✅ bit-identical |
+| 1,000 | 2.475 | 0.195 | **12.7×** | ✅ bit-identical |
+| 2,500 | 15.865 | 0.503 | **31.5×** | ✅ bit-identical |
+| 10,000 | 257.837 | 2.234 | **115.4×** | ✅ bit-identical |
+| 25,000 | 1,553.558 | 6.137 | **253.1×** | ✅ bit-identical |
 
 The speedup grows **monotonically** with size — that is the fingerprint of O(N²)→O(N).
 
 And the most important line is hidden inside the numbers: at 25,000 bars the incremental MACD
-takes 5.866 ms while `MA_CROSS` takes 5.899 ms —
+takes 6.137 ms while `MA_CROSS` takes 5.899 ms —
 **essentially the same**. Fix the algorithm and MACD immediately returns to `MA_CROSS`'s
 magnitude; its ratio against Python goes from **0.9× (losing)
-to 245× (winning)**, in line with `MA_CROSS`'s
+to 234× (winning)**, in line with `MA_CROSS`'s
 242×.
 
 > **Conclusion**: "the C++ MACD backtest loses to Python" has nothing to do with the language.
@@ -217,7 +219,7 @@ the overwhelming majority of that 2,963× is complexity order, not
 vectorization.
 
 Swap in **well-written C++** and the conclusion changes immediately: the incremental version
-from H2 runs the entire backtest in 5.866 ms, and within it the
+from H2 runs the entire backtest in 6.137 ms, and within it the
 indicator work (four floating-point operations per bar) is essentially free — that is,
 **correctly implemented C++ does not lose to numpy on indicator computation, and is faster.**
 
@@ -242,19 +244,19 @@ O(N²)), but reuses one block of memory for its four buffers, allocating nothing
 
 | Bars | Original<br>O(N²)+alloc | No-alloc<br>O(N²) | Incremental<br>O(N) | Alloc<br>share | Algorithm<br>share |
 |---|---|---|---|---|---|
-| 250 | 0.175 | 0.117 | 0.044 | 44% | 56% |
-| 1,000 | 2.270 | 1.431 | 0.179 | 40% | 60% |
-| 2,500 | 14.533 | 8.370 | 0.495 | 44% | 56% |
-| 10,000 | 239.307 | 132.333 | 2.051 | 45% | 55% |
-| 25,000 | 1,444.018 | 826.510 | 5.866 | 43% | 57% |
+| 250 | 0.188 | 0.127 | 0.047 | 43% | 57% |
+| 1,000 | 2.475 | 1.560 | 0.195 | 40% | 60% |
+| 2,500 | 15.865 | 9.056 | 0.503 | 44% | 56% |
+| 10,000 | 257.837 | 143.793 | 2.234 | 45% | 55% |
+| 25,000 | 1,553.558 | 886.967 | 6.137 | 43% | 57% |
 
 All three versions produce **identical results**. Allocation accounts for roughly
 **43%** of the available headroom, the algorithm for
 **57%**.
 
 But there is a more important observation: eliminating allocation buys only
-**1.7×**, and the no-alloc version **is still quadratic** (slope k ≈
-2.00 over the last two sizes).
+**1.8×**, and the no-alloc version **is still quadratic** (slope k ≈
+1.99 over the last two sizes).
 
 > **Allocation optimization buys a constant factor; algorithmic optimization buys an order.**
 > At scale, constant factors stop being worth much.
@@ -382,7 +384,7 @@ On 3.13.11, C++ **loses or ties on three of the four strategies** — `MACD`
 holding its lead only on `MA_CROSS`.
 
 > Worth noting: the "language/runtime" factor itself moves by **37%** just
-> from a Python point release. The 246× from O(N²)→O(N) is structural
+> from a Python point release. The 253× from O(N²)→O(N) is structural
 > and does not drift with the environment.
 > **That is itself further evidence for "don't treat language as the primary variable."**
 
@@ -396,17 +398,17 @@ Ordered by impact on final runtime:
 
 | # | Factor | Magnitude | Nature | Fixable |
 |---|---|---|---|---|
-| 1 | **Algorithmic order** O(N²)→O(N) | up to **246×**, grows with N | complexity order | ✅ yes, biggest win |
+| 1 | **Algorithmic order** O(N²)→O(N) | up to **253×**, grows with N | complexity order | ✅ yes, biggest win |
 | 2 | **Language / runtime** | **176–242×** (range from Python version) | constant factor | ⚠️ requires changing language |
 | 3 | **Data structure** (pandas scalar indexing) | about **2.5×** | constant factor | ✅ switch to numpy arrays |
-| 4 | **Heap allocation** | **1.7×** | constant factor | ✅ buffer reuse |
+| 4 | **Heap allocation** | **1.8×** | constant factor | ✅ buffer reuse |
 | 5 | **Transport layer** | **91%** of small jobs | fixed overhead | ✅ batch / in-process calls |
 | 6 | **Cold start** | **386 ms** once | fixed overhead | ⚠️ amortized by a long-lived process |
 | 7 | **Logging I/O** | below measurement resolution | — | nothing to fix |
 
 **The most important line is the comparison between rows 1 and 2:**
 
-In this dataset, **the gap from algorithmic order (up to 246×) is larger
+In this dataset, **the gap from algorithmic order (up to 253×) is larger
 than the gap from language choice (176–242×)**,
 and the former grows without bound in N and does not drift with the environment, while the
 latter is a bounded constant that moves 37% on a Python point release.
@@ -664,6 +666,8 @@ They are all committed now:
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `indicator_profile.json` | [`exp_indicator_profile.py`](exp_indicator_profile.py) |
+| `machine_drift.json` | [`exp_machine_drift.py`](exp_machine_drift.py) |
 | `prereg_2026-09-16.json` | **deliberately none** — see [round four](#round-four-predict-first-then-touch-the-code) |
 
 That last row is the one exception. A pre-registration records **predictions**, not
@@ -947,13 +951,13 @@ Two rows deserve to be called out:
 
 | # | Prediction | Measured |
 |---|---|---|
-| **P1** | The indicators are no longer the hot spot: at 25,000 bars, indicator computation accounts for under 15% of each strategy's total backtest time | ⏳ not yet measured |
-| **P2** | The HHV/LLV window scan is under 10% of a full KDJ backtest (**this one is a decision rule, not just a prediction**) | ⏳ not yet measured |
-| **P3** | If P2 holds and the monotonic deque is built anyway, KDJ at 25,000 bars only moves from 5.816 ms to 5.65–5.80 ms (0–3%), probably inside measurement noise | ⏳ not yet measured |
-| **P4** | BOLLINGER's fitted log–log slope lands in 1.00–1.10 (**this strategy has never been benchmarked; the answer is genuinely unknown right now**) | ⏳ not yet measured |
-| **P5** | MOMENTUM's fitted log–log slope lands in 1.00–1.05 (**also never measured before**) | ⏳ not yet measured |
-| **P6** | BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured | ⏳ not yet measured |
-| **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ⏳ not yet measured |
+| **P1** | The indicators are no longer the hot spot: at 25,000 bars, indicator computation accounts for under 15% of each strategy's total backtest time | ✅ hit Largest measurable share 6.2% (KDJ at 2,500 bars), far under 15%; all six strategies land between 2.0% and 6.2%. |
+| **P2** | The HHV/LLV window scan is under 10% of a full KDJ backtest (**this one is a decision rule, not just a prediction**) | ✅ hit The whole KDJ indicator — window scan included — accounts for only 6.2%, under the 10% threshold. **The decision rule fires: the monotonic deque is not built.** |
+| **P3** | If P2 holds and the monotonic deque is built anyway, KDJ at 25,000 bars only moves from 5.816 ms to 5.65–5.80 ms (0–3%), probably inside measurement noise | — not applicable By P2's decision rule the deque was never built, so there is nothing to measure. Writing down what would have happened still pays: it separates "not done" from "done and useless" after the fact. |
+| **P4** | BOLLINGER's fitted log–log slope lands in 1.00–1.10 (**this strategy has never been benchmarked; the answer is genuinely unknown right now**) | ✅ hit BOLLINGER's slope is **1.0553**, inside the predicted 1.00–1.10. |
+| **P5** | MOMENTUM's fitted log–log slope lands in 1.00–1.05 (**also never measured before**) | ❌ missed MOMENTUM's slope is **1.0719**, outside the predicted 1.00–1.05. Why it missed: the prediction assumed the engine itself contributes a slope of 1.00, so an O(1) indicator should measure 1.00. In fact all six C++ strategies land in 1.045–1.078 **regardless of indicator cost** — MA_CROSS does 25 additions per bar and fits 1.0513, *lower* than MOMENTUM, whose indicator costs nothing. So ~1.05–1.08 is a floor belonging to **the engine**, not to the indicators. (Python sits at 0.995–1.007 over the same range and has no such floor.) The floor is not attributed here; the likeliest cause is the per-bar memory footprint growing with N — history and the equity curve both lengthen, and cache behaviour degrades with them. |
+| **P6** | BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured | ✅ hit BOLLINGER 5.930 ms and MOMENTUM 5.410 ms, both inside 5.0–7.0 ms and the same magnitude as the other four. |
+| **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ⏳ not yet measured<br>⚠️ This prediction was itself malformed: it pinned a ±2% tolerance to a baseline measured on a different day. Re-measuring the *unchanged* code across sessions drifts by 2.9%–6.6% (see results/machine_drift.json) — the noise is larger than the effect. It is therefore judged against a same-session baseline instead; the original wording is left untouched. |
 | **P8** | After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path | ⏳ not yet measured |
 | **P9** | The test "run two backtests in one process; the second must equal a standalone run" goes **red** before on_init() is implemented | ⏳ not yet measured |
 | **P10** | The test "two symbols in one engine sharing one strategy instance" also goes **red** before the fix (cross-symbol contamination) | ⏳ not yet measured |
@@ -966,6 +970,104 @@ Two rows deserve to be called out:
 In other words, this round accepts up front that the answer may be "having looked, don't change
 it." That is what "only change what the profile shows is hot" actually costs — otherwise the
 sentence is just a justification applied after the change was already made.
+
+### The profile: are the indicators still the hot spot?
+
+"Only change what the profile shows is hot" — so, profile it.
+
+⛔ **Not by timing the indicator in an isolated loop.** That measures the cost with the data
+sitting in L1; a real backtest interleaves portfolio valuation, matching and calendar
+advancement, which evict those bars. An isolated timing is a lower bound, not a fact.
+
+Instead, the control-arm method this repository already uses: the *same* backtest, with the
+`ctx.macd()`-style call replaced by "index into a precomputed array," and every other line
+untouched. The two arms' trade counts and final equity are **bit-identical**, so the time
+difference is the indicator and nothing else.
+
+> **The second dead end is worth recording too.** The first version ran each arm in its own
+> process and subtracted. All six strategies came out **inside the noise**, and `RSI` and
+> `MOMENTUM` measured a **negative** indicator cost — the control arm does strictly less work
+> and cannot be slower. Process-level jitter was larger than the effect; that whole version was
+> discarded.
+>
+> What runs now is **paired, interleaved, in one process**: each round times A and B back to
+> back for one difference, so common-mode drift cancels. Each round also swaps the order, so
+> "whoever runs first pays for cache warm-up" cannot favour one arm systematically. The verdict
+> does not rest on whether the percentage looks good — it rests on a **sign test**: 21 rounds
+> all positive has a 4.8e-07 chance of being luck.
+
+| Bars | Strategy | Whole backtest (ms) | Indicator (ms) | Share | Positive | Sign-test p | Verdict |
+|---|---|---|---|---|---|---|---|
+| 2,500 | `MA_CROSS` | 0.505 | 0.016 | 3.2% | 21/21 | 4.8e-07 | ✅ |
+| 2,500 | `MACD` | 0.497 | 0.017 | 3.4% | 20/21 | 1.0e-05 | ✅ |
+| 2,500 | `RSI` | 0.475 | 0.013 | 2.7% | 20/21 | 1.0e-05 | ✅ |
+| 2,500 | `KDJ` | 0.520 | 0.032 | 6.2% | 20/21 | 1.0e-05 | ✅ |
+| 2,500 | `BOLLINGER` | 0.516 | 0.032 | 6.2% | 20/21 | 1.0e-05 | ✅ |
+| 2,500 | `MOMENTUM` | 0.451 | -0.000 | — | 9/21 | 8.1e-01 | ⚠️ not measurable |
+| 10,000 | `MA_CROSS` | 2.238 | 0.055 | — | 16/21 | 1.3e-02 | ⚠️ not measurable |
+| 10,000 | `MACD` | 2.260 | 0.074 | — | 15/21 | 3.9e-02 | ⚠️ not measurable |
+| 10,000 | `RSI` | 2.131 | 0.063 | 3.0% | 18/21 | 7.4e-04 | ✅ |
+| 10,000 | `KDJ` | 2.212 | 0.116 | 5.2% | 19/21 | 1.1e-04 | ✅ |
+| 10,000 | `BOLLINGER` | 2.247 | 0.128 | 5.7% | 20/21 | 1.0e-05 | ✅ |
+| 10,000 | `MOMENTUM` | 1.998 | -0.006 | — | 8/21 | 9.1e-01 | ⚠️ not measurable |
+| 25,000 | `MA_CROSS` | 6.115 | 0.164 | 2.7% | 18/21 | 7.4e-04 | ✅ |
+| 25,000 | `MACD` | 6.103 | 0.181 | 3.0% | 19/21 | 1.1e-04 | ✅ |
+| 25,000 | `RSI` | 5.916 | 0.116 | — | 15/21 | 3.9e-02 | ⚠️ not measurable |
+| 25,000 | `KDJ` | 6.103 | 0.228 | 3.7% | 21/21 | 4.8e-07 | ✅ |
+| 25,000 | `BOLLINGER` | 6.145 | 0.281 | 4.6% | 20/21 | 1.0e-05 | ✅ |
+| 25,000 | `MOMENTUM` | 5.603 | -0.005 | — | 10/21 | 6.7e-01 | ⚠️ not measurable |
+
+Three things:
+
+1. **The indicators are no longer the hot spot.** Every measurable share falls between
+   2.7% and 6.2%, far below the 15% ceiling that was
+   pre-registered. Once the previous round removed the O(N²), the headroom left in indicator
+   optimisation was capped right there.
+2. **All three `MOMENTUM` rows come out "not measurable" — and that is the method checking
+   itself.** `returns()` is already O(1) (class B in the table above), so its cost *should* be
+   zero; the sign test returns 9/21, 8/21, 10/21 — a coin flip. A quantity known to be zero
+   measuring as zero is what says the paired method has no systematic bias.
+3. **P2's decision rule therefore fires: the monotonic deque is not built.** The KDJ indicator
+   *as a whole* — window scan included — is only
+   3.7%
+   of the backtest. Optimising a fraction of that lands below measurement resolution. The
+   pre-registration said "under 10% means don't build it," so it does not get built. That is
+   what "only change what the profile shows is hot" actually costs.
+
+### An unanticipated finding: cross-session drift is larger than the effect
+
+P7 set the tolerance for the interface refactor at "within ±2% of the pre-change timings,"
+taking the baseline from a record made a few days earlier. Before touching anything, that
+baseline was checked:
+
+| Strategy | Earlier record (ms) | Re-measured today (ms) | Drift | Code changed |
+|---|---|---|---|---|
+| `MA_CROSS` | 5.541 | 5.906 | **+6.6%** | **no** |
+| `MACD` | 5.738 | 5.915 | **+3.1%** | **no** |
+| `RSI` | 5.550 | 5.802 | **+4.5%** | **no** |
+| `KDJ` | 5.816 | 5.986 | **+2.9%** | **no** |
+| `BOLLINGER` | never measured before | 5.930 | — | **no** |
+| `MOMENTUM` | never measured before | 5.410 | — | **no** |
+
+**Same code, not one byte changed, and it drifts 2.9%–6.6% between
+sessions.** (One run in the process reported `MA_CROSS` at +30.4%; the machine was busy for
+that pass and the three that followed all came back under 10%, so that figure is an outlier,
+not a finding.)
+
+Which means P7's ±2% **cannot be satisfied**, however clean the refactor is. The
+pre-registration exposed its own flaw: **it pinned a tolerance to a baseline from another day.**
+The wording stays exactly as written; what changes is that it will be judged against a
+**same-session** baseline instead — the `remeasured_min` column above.
+
+The number is worth publishing on its own: it is the precision ceiling for every cross-session
+speed comparison on this machine. **A "speedup" smaller than 6.6% does not hold up
+across sessions.**
+
+> A contrast worth noting: absolute timings drifted 2.9%–6.6%, while the
+> log–log slopes fitted from the same data moved by only **±0.015** across sessions
+> (`MA_CROSS` 1.0656→1.0513, `MACD (before the fix)` 1.9696→1.9691).
+> **This is exactly why a slope is worth more than a speedup factor**: the factor measures what
+> this machine was doing today, the slope measures the order of the algorithm.
 
 ### About that parity-gate probe
 

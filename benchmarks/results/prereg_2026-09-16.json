@@ -121,7 +121,12 @@
       "predicted": {
         "max_share_pct": 15.0
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "detail": "可测出的最大占比 6.2%（KDJ @2,500），远低于 15%。六个策略全部落在 2.0%–6.2%。",
+        "detail_en": "Largest measurable share 6.2% (KDJ at 2,500 bars), far under 15%; all six strategies land between 2.0% and 6.2%.",
+        "verdict_en": "✅ hit"
+      }
     },
     {
       "id": "P2",
@@ -131,7 +136,12 @@
       "predicted": {
         "share_pct_upper": 10.0
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "detail": "KDJ 的指标整体只占 6.2%（含窗口扫描在内），低于 10% 阈值。**决策规则生效：单调队列不实现。**",
+        "detail_en": "The whole KDJ indicator — window scan included — accounts for only 6.2%, under the 10% threshold. **The decision rule fires: the monotonic deque is not built.**",
+        "verdict_en": "✅ hit"
+      }
     },
     {
       "id": "P3",
@@ -142,7 +152,12 @@
         "kdj_25k_ms_low": 5.65,
         "kdj_25k_ms_high": 5.8
       },
-      "measured": null
+      "measured": {
+        "verdict": "— 不适用",
+        "detail": "按 P2 的决策规则，单调队列没有实现，所以这条无从验证。预先写下「若做了会怎样」的意义在于：事后能区分「没做」和「做了但没用」。",
+        "detail_en": "By P2's decision rule the deque was never built, so there is nothing to measure. Writing down what would have happened still pays: it separates \"not done\" from \"done and useless\" after the fact.",
+        "verdict_en": "— not applicable"
+      }
     },
     {
       "id": "P4",
@@ -153,7 +168,12 @@
         "slope_low": 1.0,
         "slope_high": 1.1
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "detail": "BOLLINGER 斜率 **1.0553**，落在预测的 1.00–1.10 内。",
+        "detail_en": "BOLLINGER's slope is **1.0553**, inside the predicted 1.00–1.10.",
+        "verdict_en": "✅ hit"
+      }
     },
     {
       "id": "P5",
@@ -164,7 +184,12 @@
         "slope_low": 1.0,
         "slope_high": 1.05
       },
-      "measured": null
+      "measured": {
+        "verdict": "❌ 落空",
+        "detail": "MOMENTUM 斜率 **1.0719**，超出预测的 1.00–1.05。错因：预测时默认「引擎本身贡献斜率 1.00，所以 O(1) 的指标就该测出 1.00」。实测六个 C++ 策略全部落在 1.045–1.078，**与指标成本无关** —— MA_CROSS 每根 bar 做 25 次加法，斜率 1.0513，反而**低于**指标成本为零的 MOMENTUM。也就是说 ~1.05–1.08 是**引擎自身的底**，不是指标带来的。（Python 侧同期是 0.995–1.007，没有这个底。）底从哪来未做归因，最可能是每根 bar 的内存足迹随 N 增长：history 与净值曲线都在变长，缓存行为随之变差。",
+        "detail_en": "MOMENTUM's slope is **1.0719**, outside the predicted 1.00–1.05. Why it missed: the prediction assumed the engine itself contributes a slope of 1.00, so an O(1) indicator should measure 1.00. In fact all six C++ strategies land in 1.045–1.078 **regardless of indicator cost** — MA_CROSS does 25 additions per bar and fits 1.0513, *lower* than MOMENTUM, whose indicator costs nothing. So ~1.05–1.08 is a floor belonging to **the engine**, not to the indicators. (Python sits at 0.995–1.007 over the same range and has no such floor.) The floor is not attributed here; the likeliest cause is the per-bar memory footprint growing with N — history and the equity curve both lengthen, and cache behaviour degrades with them.",
+        "verdict_en": "❌ missed"
+      }
     },
     {
       "id": "P6",
@@ -175,7 +200,12 @@
         "ms_low": 5.0,
         "ms_high": 7.0
       },
-      "measured": null
+      "measured": {
+        "verdict": "✅ 命中",
+        "detail": "BOLLINGER 5.930 ms、MOMENTUM 5.410 ms，都落在 5.0–7.0 ms 内，与另外四个策略同一量级。",
+        "detail_en": "BOLLINGER 5.930 ms and MOMENTUM 5.410 ms, both inside 5.0–7.0 ms and the same magnitude as the other four.",
+        "verdict_en": "✅ hit"
+      }
     },
     {
       "id": "P7",
@@ -191,7 +221,9 @@
       "predicted": {
         "tolerance_pct": 2.0
       },
-      "measured": null
+      "measured": null,
+      "note": "⚠️ 这条预测本身写错了：它把 ±2% 的容差钉在**另一天测的基线**上。实测同一份未改动的代码跨会话就漂 2.9%–6.6%（见 results/machine_drift.json），噪声比要测的效应还大。所以改为与**同一次会话**的基线对比，原预测原样留着不改。",
+      "note_en": "⚠️ This prediction was itself malformed: it pinned a ±2% tolerance to a baseline measured on a different day. Re-measuring the *unchanged* code across sessions drifts by 2.9%–6.6% (see results/machine_drift.json) — the noise is larger than the effect. It is therefore judged against a same-session baseline instead; the original wording is left untouched."
     },
     {
       "id": "P8",
