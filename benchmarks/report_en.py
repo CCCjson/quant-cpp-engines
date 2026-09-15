@@ -115,6 +115,7 @@ Every number can be traced to a file in [`results/`](results/) — this README i
 - [The order book: an absolute baseline with no control group](#the-order-book-an-absolute-baseline-with-no-control-group)
 - [What was done to make these numbers trustworthy](#what-was-done-to-make-these-numbers-trustworthy)
 - [Round three: fixed, then re-measured](#round-three-fixed-then-re-measured)
+- [Round four: predict first, then touch the code](#round-four-predict-first-then-touch-the-code)
 - [Concrete defects this investigation found](#concrete-defects-this-investigation-found)
 - [Reproducing](#reproducing)
 
@@ -713,6 +714,12 @@ They are all committed now:
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `prereg_{prereg['registered_at']}.json` | **deliberately none** — see [round four](#round-four-predict-first-then-touch-the-code) |
+
+That last row is the one exception. A pre-registration records **predictions**, not
+measurements: "re-run it and you get it back" is precisely the property it must not have. Once
+written it is never edited — round four only fills in the `measured` field, leaving `claim` and
+`predicted` untouched.
 
 As a self-check after backfilling: re-running `backtest_py313.json` with the new generator
 landed within about 1% of the original record **on the same interpreter** (for instance
@@ -926,6 +933,73 @@ Not by "the numbers came out close." By three layers:
 
 Raw data: [`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json),
 produced by [`exp_incremental_engine.py`](exp_incremental_engine.py).
+
+---
+
+## Round four: predict first, then touch the code
+
+Round three proved "it got faster after the fix." What it did **not** prove is "we knew how much
+faster before the fix" — every number in that round was measured after the fact.
+
+That is a methodological gap, and the most self-flattering kind: once the change is made,
+there is always a story that explains the result. So this round writes the predictions down first.
+
+The pre-registration lives in
+[`results/prereg_{prereg['registered_at']}.json`](results/prereg_{prereg['registered_at']}.json),
+written on **{prereg['registered_at']}**, before a single line of implementation landed.
+
+> It is the only file in [`results/`](results/) with **no generator**, and it has to be. A
+> generator means "re-run it and you get it back," whereas a prediction is worth something only
+> because it was written before the run and is never touched again. In the "every result file
+> has a generator" table above, this row is a **deliberate** exception.
+
+### Owning up: the previous round was not pre-registered
+
+{prereg['honesty_note_en']['问题']}
+
+{prereg['honesty_note_en']['为什么不补']}
+
+{prereg['honesty_note_en']['记为缺陷']}
+
+### Classify first, then decide what to touch
+
+"Only change what the profile shows is hot" is executable only once every indicator has been
+placed in a class with a stated basis. The basis column below says what the code does, not how
+it feels.
+
+{prereg_class_table('en')}
+
+Two rows deserve to be called out:
+
+- **`sma` / `stddev` could be made O(1) and are deliberately left alone.** A running sum changes
+  the order of floating-point additions, so bit-identity goes away. In this repository
+  bit-identity outranks that constant factor — and that trade-off says more than "I optimised
+  everything that could be optimised" would.
+- **`highest_close` / `lowest_close` are class A and are also left alone.** Being optimisable is
+  not the same as being worth optimising: no strategy calls either on a hot path. The
+  classification answers *can it*; the profile answers *is it worth it*.
+
+### The pre-registered predictions
+
+{prereg_pred_table('en')}
+
+**P2 is not an ordinary prediction — it is a decision rule:**
+
+> {next(it for it in prereg['classification']['items'] if 'HHV' in it['indicator'])['decision_rule_en']}
+
+In other words, this round accepts up front that the answer may be "having looked, don't change
+it." That is what "only change what the profile shows is hot" actually costs — otherwise the
+sentence is just a justification applied after the change was already made.
+
+### About that parity-gate probe
+
+{prereg['parity_probe']['_note_en']}
+
+On {prereg['parity_probe']['fixture_en']}:
+
+- **MACD** — {prereg['parity_probe']['findings_en']['MACD']}
+- **KDJ** — {prereg['parity_probe']['findings_en']['KDJ']}
+- **RSI** — {prereg['parity_probe']['findings_en']['RSI']}
 
 ---
 

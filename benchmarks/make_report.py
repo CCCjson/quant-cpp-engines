@@ -35,6 +35,73 @@ parity = load("parity.json")
 py313 = load("backtest_py313.json")
 inc_engine = load("experiment_incremental_engine.json")
 
+# ────────────────────────────────────────────────────────────
+# 预注册（pre-registration）
+#
+# ⚠️ prereg_*.json 是 results/ 里唯一**没有生成脚本**的文件，而且必须没有 ——
+#    它记的是预测，不是测量。生成脚本意味着「跑一下就能重新得到」，
+#    而预测的全部价值恰恰在于它写在跑之前、并且此后不许再动。
+#
+# 下面两个渲染函数把它变成表格。measured 为 null 时显示「待回填」，
+# 回填后自动显示命中/落空 —— 这样 README 永远不会出现「预测和实测对不上
+# 但文字还在说命中」这种情况，因为两边都来自同一个文件。
+# ────────────────────────────────────────────────────────────
+prereg = load("prereg_2026-09-16.json")
+
+
+def _prereg_rows(items, cols):
+    """把 dict 列表渲染成 markdown 表格。cols = [(表头, 取值函数), ...]"""
+    head = "| " + " | ".join(h for h, _ in cols) + " |"
+    sep = "|" + "|".join("---" for _ in cols) + "|"
+    body = ["| " + " | ".join(str(f(it)) for _, f in cols) + " |" for it in items]
+    return "\n".join([head, sep] + body)
+
+
+def _measured_cell(p, lang="zh"):
+    m = p.get("measured")
+    if m is None:
+        return "⏳ 待回填" if lang == "zh" else "⏳ not yet measured"
+    key = "detail" if lang == "zh" else "detail_en"
+    return f"{m.get('verdict', '')} {m.get(key, m.get('detail', ''))}".strip()
+
+
+def prereg_class_table(lang="zh"):
+    cols_zh = [
+        ("指标", lambda it: f"`{it['indicator']}`"),
+        ("类", lambda it: f"**{it['class']}**"),
+        ("处理", lambda it: it["status"]),
+        ("依据（代码事实）", lambda it: it["evidence"]),
+    ]
+    cols_en = [
+        ("Indicator", lambda it: f"`{it.get('indicator_en', it['indicator'])}`"),
+        ("Class", lambda it: f"**{it['class']}**"),
+        ("Disposition", lambda it: it.get("status_en", it["status"])),
+        ("Basis (what the code actually does)", lambda it: it.get("evidence_en", it["evidence"])),
+    ]
+    return _prereg_rows(prereg["classification"]["items"],
+                        cols_zh if lang == "zh" else cols_en)
+
+
+def prereg_pred_table(lang="zh"):
+    cols_zh = [
+        ("#", lambda p: f"**{p['id']}**"),
+        ("预测", lambda p: p["claim"]),
+        ("实测", lambda p: _measured_cell(p, "zh")),
+    ]
+    cols_en = [
+        ("#", lambda p: f"**{p['id']}**"),
+        ("Prediction", lambda p: p.get("claim_en", p["claim"])),
+        ("Measured", lambda p: _measured_cell(p, "en")),
+    ]
+    return _prereg_rows(prereg["predictions"],
+                        cols_zh if lang == "zh" else cols_en)
+
+
+# 预测的命中率 —— 现算，不写死。全部待回填时显示为 None。
+_scored = [p for p in prereg["predictions"] if p.get("measured") is not None]
+prereg_hits = sum(1 for p in _scored if p["measured"].get("verdict", "").startswith("✅"))
+prereg_scored = len(_scored)
+
 
 def r313(bars: int, strategy: str):
     return next(r for r in py313["results"] if r["bars"] == bars and r["strategy"] == strategy)
@@ -238,6 +305,7 @@ doc_zh = f"""# 快慢到底由什么决定 —— 一次从假设到证伪的性
 - [订单簿：没有对照组的绝对基线](#订单簿没有对照组的绝对基线)
 - [为了让这些数字可信，做了什么](#为了让这些数字可信做了什么)
 - [第三轮：修复与复测](#第三轮修复与复测)
+- [第四轮：先预测，再动手](#第四轮先预测再动手)
 - [这次调查查出来的具体问题](#这次调查查出来的具体问题)
 - [复现](#复现)
 
@@ -771,6 +839,11 @@ harness 不同的 before/after 不可比，这一点比多报一个倍数重要�
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `prereg_{prereg['registered_at']}.json` | **刻意没有** —— 见[第四轮](#第四轮先预测再动手) |
+
+唯一的例外是最后一行。预注册文件记的是**预测**，不是测量：
+「跑一下就能重新得到」恰恰是它不该具备的性质。它写下来之后就不许再动，
+Phase 4 只回填 `measured` 字段，`claim` 与 `predicted` 一个字不改。
 
 补完之后做了一次自我核对：用新脚本重跑 `backtest_py313.json`，
 与原来那份**同一解释器**下的记录相差约 1%（例如 25,000 根的 `MA_CROSS`
@@ -951,6 +1024,68 @@ macOS 的 `steady_clock` 底层是 `mach_absolute_time`，实测最小非零间�
 
 原始数据：[`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json)，
 由 [`exp_incremental_engine.py`](exp_incremental_engine.py) 生成。
+
+---
+
+## 第四轮：先预测，再动手
+
+第三轮证明了「改完变快了」。它**没有**证明的是「改之前就知道会变快多少」——
+那一轮的每一个数字都是事后测量的。
+
+这是个方法论缺口，而且是最容易自欺的那种：改完再解释为什么会这样，
+永远解释得通。所以本轮先把预测写下来。
+
+预注册文件：[`results/prereg_{prereg['registered_at']}.json`](results/prereg_{prereg['registered_at']}.json)，
+写于 **{prereg['registered_at']}**，在任何一行实现代码落地之前。
+
+> 它是 [`results/`](results/) 里唯一**没有生成脚本**的文件，而且必须没有。
+> 生成脚本意味着「跑一下就能重新得到」，而预测的全部价值恰恰在于
+> 它写在跑之前、此后不许再动。上面那张「每个结果文件都有生成脚本」的表格，
+> 这一行是**刻意的例外**。
+
+### 坦白：上一轮没有预注册
+
+{prereg['honesty_note']['问题']}
+
+{prereg['honesty_note']['为什么不补']}
+
+{prereg['honesty_note']['记为缺陷']}
+
+### 先分类，再决定改什么
+
+「只改剖析显示是热点的东西」要能执行，前提是先说清楚每个指标属于哪一类、
+依据是什么。依据写的是代码事实，不是印象。
+
+{prereg_class_table('zh')}
+
+两条值得单独说：
+
+- **`sma` / `stddev` 明明能改成 O(1)，但刻意不改。** 滚动和会改变浮点求和顺序，
+  于是不再逐位等价。这个仓库里逐位等价的优先级高于常数因子 —— 这条取舍本身
+  比「我把能优化的都优化了」更能说明问题。
+- **`highest_close` / `lowest_close` 归在 A 类，但同样不改。** 可优化不等于该优化：
+  没有任何策略在热路径上调用它们。归类回答的是「能不能」，剖析回答的是「值不值」。
+
+### 预注册的预测
+
+{prereg_pred_table('zh')}
+
+其中 **P2 不是一条普通预测，而是一条决策规则**：
+
+> {next(it for it in prereg['classification']['items'] if 'HHV' in it['indicator'])['decision_rule']}
+
+也就是说，本轮预先接受了「查完发现不该改，那就不改」这个结果。
+这是「只改热点」的字面执行 —— 否则那句话只是事后给已经做了的改动找的理由。
+
+### 关于 parity 门禁的那次预探
+
+{prereg['parity_probe']['_note']}
+
+在 {prereg['parity_probe']['fixture']} 上：
+
+- **MACD** — {prereg['parity_probe']['findings']['MACD']}
+- **KDJ** — {prereg['parity_probe']['findings']['KDJ']}
+- **RSI** — {prereg['parity_probe']['findings']['RSI']}
 
 ---
 

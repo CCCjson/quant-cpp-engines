@@ -25,6 +25,7 @@ Every number can be traced to a file in [`results/`](results/) — this README i
 - [The order book: an absolute baseline with no control group](#the-order-book-an-absolute-baseline-with-no-control-group)
 - [What was done to make these numbers trustworthy](#what-was-done-to-make-these-numbers-trustworthy)
 - [Round three: fixed, then re-measured](#round-three-fixed-then-re-measured)
+- [Round four: predict first, then touch the code](#round-four-predict-first-then-touch-the-code)
 - [Concrete defects this investigation found](#concrete-defects-this-investigation-found)
 - [Reproducing](#reproducing)
 
@@ -663,6 +664,12 @@ They are all committed now:
 | `experiment_incremental_engine.json` | [`exp_incremental_engine.py`](exp_incremental_engine.py) |
 | `experiment_pandas_overhead.json` | [`exp_pandas_overhead.py`](exp_pandas_overhead.py) |
 | `backtest_py313.json` | [`bench_py_version.py`](bench_py_version.py) |
+| `prereg_2026-09-16.json` | **deliberately none** — see [round four](#round-four-predict-first-then-touch-the-code) |
+
+That last row is the one exception. A pre-registration records **predictions**, not
+measurements: "re-run it and you get it back" is precisely the property it must not have. Once
+written it is never edited — round four only fills in the `measured` field, leaving `claim` and
+`predicted` untouched.
 
 As a self-check after backfilling: re-running `backtest_py313.json` with the new generator
 landed within about 1% of the original record **on the same interpreter** (for instance
@@ -880,6 +887,95 @@ Not by "the numbers came out close." By three layers:
 
 Raw data: [`results/experiment_incremental_engine.json`](results/experiment_incremental_engine.json),
 produced by [`exp_incremental_engine.py`](exp_incremental_engine.py).
+
+---
+
+## Round four: predict first, then touch the code
+
+Round three proved "it got faster after the fix." What it did **not** prove is "we knew how much
+faster before the fix" — every number in that round was measured after the fact.
+
+That is a methodological gap, and the most self-flattering kind: once the change is made,
+there is always a story that explains the result. So this round writes the predictions down first.
+
+The pre-registration lives in
+[`results/prereg_2026-09-16.json`](results/prereg_2026-09-16.json),
+written on **2026-09-16**, before a single line of implementation landed.
+
+> It is the only file in [`results/`](results/) with **no generator**, and it has to be. A
+> generator means "re-run it and you get it back," whereas a prediction is worth something only
+> because it was written before the run and is never touched again. In the "every result file
+> has a generator" table above, this row is a **deliberate** exception.
+
+### Owning up: the previous round was not pre-registered
+
+The numbers from the previous round (commit 022f0fb, making macd/rsi/kdj incremental) — MACD 251×, slope 1.9696 → 1.054 — were measured **after the fact**. They were not pre-registered.
+
+The change has already happened and the numbers are already in. Going back now to write "I predicted 251× all along" would be self-deception. A pre-registration is worth something precisely because it is written before the answer is visible.
+
+So that round has a methodological gap: it proved "it got faster after the fix," but not "we knew how much faster before the fix." This file closes that gap for the first time, and it applies only to quantities that have **not yet been measured**.
+
+### Classify first, then decide what to touch
+
+"Only change what the profile shows is hot" is executable only once every indicator has been
+placed in a class with a stated basis. The basis column below says what the code does, not how
+it feels.
+
+| Indicator | Class | Disposition | Basis (what the code actually does) |
+|---|---|---|---|
+| `macd` | **A** | done (022f0fb) | strategy_context.h — EMA recurrence; three scalars (ema_fast, ema_slow, dea) are carried forward |
+| `rsi` | **A** | done (022f0fb) | strategy_context.h — Wilder recurrence; the three-phase boundary (accumulate → divide once → switch to recurrence) is pinned by the golden fixture |
+| `kdj / K-D recurrence` | **A** | done (022f0fb) | strategy_context.h step_kdj — (k, d) persist; the outer i loop is gone |
+| `kdj / HHV-LLV window scan` | **A** | candidate — the profile decides whether it happens at all | step_kdj still scans n bars inside. max/min are exact — they round nothing — so a monotonic deque would **still be bit-identical**. That is what puts this in class A rather than class C |
+| `sma / stddev / bollinger` | **B** | left alone | Recomputed within a window of constant width (5/20), so a whole backtest is already O(N·W) and the fitted slope is already ~1.0. A running sum would make it O(1) — **but it would change the order of floating-point additions and break bit-identity**. Bit-identity outranks that constant factor here |
+| `pairs / spread window` | **B** | left alone | pairs_strategy.cpp — same shape: mean/stddev recomputed within the window |
+| `returns` | **B** | left alone | strategy_context.h — already O(1) |
+| `highest_close / lowest_close` | **A** | left alone (not hot) | O(lookback), and a monotonic deque would make it amortised O(1) while staying bit-identical — but **no strategy calls either one on a hot path**. Being in class A is not the same as being worth changing |
+| `ema / ema_at` | **C** | deleted | O(N) per bar — O(N²) over a backtest — with **zero callers and zero tests anywhere in the repo**, sitting on the public context API. Leaving it there makes the claim "the indicators are all incremental now" false |
+
+Two rows deserve to be called out:
+
+- **`sma` / `stddev` could be made O(1) and are deliberately left alone.** A running sum changes
+  the order of floating-point additions, so bit-identity goes away. In this repository
+  bit-identity outranks that constant factor — and that trade-off says more than "I optimised
+  everything that could be optimised" would.
+- **`highest_close` / `lowest_close` are class A and are also left alone.** Being optimisable is
+  not the same as being worth optimising: no strategy calls either on a hot path. The
+  classification answers *can it*; the profile answers *is it worth it*.
+
+### The pre-registered predictions
+
+| # | Prediction | Measured |
+|---|---|---|
+| **P1** | The indicators are no longer the hot spot: at 25,000 bars, indicator computation accounts for under 15% of each strategy's total backtest time | ⏳ not yet measured |
+| **P2** | The HHV/LLV window scan is under 10% of a full KDJ backtest (**this one is a decision rule, not just a prediction**) | ⏳ not yet measured |
+| **P3** | If P2 holds and the monotonic deque is built anyway, KDJ at 25,000 bars only moves from 5.816 ms to 5.65–5.80 ms (0–3%), probably inside measurement noise | ⏳ not yet measured |
+| **P4** | BOLLINGER's fitted log–log slope lands in 1.00–1.10 (**this strategy has never been benchmarked; the answer is genuinely unknown right now**) | ⏳ not yet measured |
+| **P5** | MOMENTUM's fitted log–log slope lands in 1.00–1.05 (**also never measured before**) | ⏳ not yet measured |
+| **P6** | BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured | ⏳ not yet measured |
+| **P7** | After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings | ⏳ not yet measured |
+| **P8** | After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path | ⏳ not yet measured |
+| **P9** | The test "run two backtests in one process; the second must equal a standalone run" goes **red** before on_init() is implemented | ⏳ not yet measured |
+| **P10** | The test "two symbols in one engine sharing one strategy instance" also goes **red** before the fix (cross-symbol contamination) | ⏳ not yet measured |
+| **P11** | Deleting ema() / ema_at() turns no test red | ⏳ not yet measured |
+
+**P2 is not an ordinary prediction — it is a decision rule:**
+
+> If the profile shows the window scan is under 10% of a full KDJ backtest, the monotonic deque does **not** get implemented, and the decision not to build it is recorded together with its reason.
+
+In other words, this round accepts up front that the answer may be "having looked, don't change
+it." That is what "only change what the profile shows is hot" actually costs — otherwise the
+sentence is just a justification applied after the change was already made.
+
+### About that parity-gate probe
+
+This item is a **measured fact, not a prediction**. The brief was to probe first and then decide whether to widen the gate, so it ran before the pre-registration was written. Labelled as such rather than quietly folded in among the predictions.
+
+On benchmarks/data/cpp_bars.json (180 real daily bars — the same fixture the parity gate already uses):
+
+- **MACD** — all seven economic metrics at 0.00e+00 → added to the gate
+- **KDJ** — all seven economic metrics at 0.00e+00 → added to the gate
+- **RSI** — final equity differs by 5.58e+04 → **not** added; the divergence is diagnosed and written up instead. The gate is not loosened to accommodate it
 
 ---
 

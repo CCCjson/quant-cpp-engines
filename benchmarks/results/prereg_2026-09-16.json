@@ -1,0 +1,237 @@
+{
+  "_README": "预注册（pre-registration）：本轮改动开始之前写下的预测。⚠️ 这个文件是本目录里唯一**没有生成器**的结果文件，而且必须没有 —— 它是预测，不是测量。写入时下面每一条的 measured 都是 null，由 Phase 4 回填。回填时不许改动 predicted / claim 字段；预测错了就让它错着，错的条目比对的条目更值钱。中英两版 README 都从本文件渲染，所以每条都带一份 *_en。",
+  "registered_at": "2026-09-16",
+  "registered_by": "本轮改动的 Phase 0，在任何一行实现代码落地之前",
+  "honesty_note": {
+    "问题": "上一轮（commit 022f0fb，macd/rsi/kdj 改增量递推）的那些数字——MACD 251×、斜率 1.9696→1.054——是**事后测量**，不是预注册。",
+    "为什么不补": "改动已经发生、数字已经出来了，现在回头写一份『我早就预测会是 251×』是自欺。预注册的全部价值在于它写在看到答案之前。",
+    "记为缺陷": "所以那一轮在方法论上是有缺口的：它证明了『改完变快了』，但没有证明『改之前就知道会变快多少』。本文件是第一次补上这个环节，只对**尚未测量**的量生效。"
+  },
+  "honesty_note_en": {
+    "问题": "The numbers from the previous round (commit 022f0fb, making macd/rsi/kdj incremental) — MACD 251×, slope 1.9696 → 1.054 — were measured **after the fact**. They were not pre-registered.",
+    "为什么不补": "The change has already happened and the numbers are already in. Going back now to write \"I predicted 251× all along\" would be self-deception. A pre-registration is worth something precisely because it is written before the answer is visible.",
+    "记为缺陷": "So that round has a methodological gap: it proved \"it got faster after the fix,\" but not \"we knew how much faster before the fix.\" This file closes that gap for the first time, and it applies only to quantities that have **not yet been measured**."
+  },
+  "parity_probe": {
+    "_note": "这一项是**探明的事实，不是预测**。用户要求『先探一下再决定要不要扩门禁』，所以它在预注册之前就跑了，如实标注。",
+    "_note_en": "This item is a **measured fact, not a prediction**. The brief was to probe first and then decide whether to widen the gate, so it ran before the pre-registration was written. Labelled as such rather than quietly folded in among the predictions.",
+    "ran_at": "2026-09-16",
+    "fixture": "benchmarks/data/cpp_bars.json（180 根真实日线，与 parity 门禁同一份）",
+    "fixture_en": "benchmarks/data/cpp_bars.json (180 real daily bars — the same fixture the parity gate already uses)",
+    "findings": {
+      "MACD": "七项经济指标全部 0.00e+00 → 决定扩入门禁",
+      "KDJ": "七项经济指标全部 0.00e+00 → 决定扩入门禁",
+      "RSI": "最终资产差 5.58e+04 → 决定**不扩**，把分歧查清写进 README，不降门禁"
+    },
+    "findings_en": {
+      "MACD": "all seven economic metrics at 0.00e+00 → added to the gate",
+      "KDJ": "all seven economic metrics at 0.00e+00 → added to the gate",
+      "RSI": "final equity differs by 5.58e+04 → **not** added; the divergence is diagnosed and written up instead. The gate is not loosened to accommodate it"
+    }
+  },
+  "classification": {
+    "_note": "A = 可改成 O(1)/摊还 O(1) 且逐位等价；B = 窗口内重算，整体已是 O(N·W)，W 为常数，不改；C = 改了就不逐位等价，因此不改。依据写的是代码事实，不是印象。",
+    "_note_en": "A = can become O(1) / amortised O(1) while staying bit-identical; B = recomputed within a constant-width window, already O(N·W) overall, left alone; C = changing it would break bit-identity, so it is not changed. The basis column states what the code does, not an impression of it.",
+    "items": [
+      {
+        "indicator": "macd",
+        "class": "A",
+        "status": "已完成（022f0fb）",
+        "status_en": "done (022f0fb)",
+        "evidence": "strategy_context.h — EMA 递推，持久化 (ema_fast, ema_slow, dea) 三个标量",
+        "evidence_en": "strategy_context.h — EMA recurrence; three scalars (ema_fast, ema_slow, dea) are carried forward"
+      },
+      {
+        "indicator": "rsi",
+        "class": "A",
+        "status": "已完成（022f0fb）",
+        "status_en": "done (022f0fb)",
+        "evidence": "strategy_context.h — Wilder 递推，『累加→除一次→转递推』三段边界已由金标准钉住",
+        "evidence_en": "strategy_context.h — Wilder recurrence; the three-phase boundary (accumulate → divide once → switch to recurrence) is pinned by the golden fixture"
+      },
+      {
+        "indicator": "kdj / K-D 递推",
+        "class": "A",
+        "status": "已完成（022f0fb）",
+        "status_en": "done (022f0fb)",
+        "evidence": "strategy_context.h step_kdj — 持久化 (k, d)，去掉外层 i 循环",
+        "evidence_en": "strategy_context.h step_kdj — (k, d) persist; the outer i loop is gone",
+        "indicator_en": "kdj / K-D recurrence"
+      },
+      {
+        "indicator": "kdj / HHV-LLV 窗口扫描",
+        "class": "A",
+        "status": "候选，由 Phase 0 剖析决定做不做",
+        "status_en": "candidate — the profile decides whether it happens at all",
+        "evidence": "step_kdj 内层仍扫 n 根 bar。max/min 是精确运算、无舍入，所以换成单调队列**仍然逐位等价** —— 这是它属于 A 类而不是 C 类的原因",
+        "evidence_en": "step_kdj still scans n bars inside. max/min are exact — they round nothing — so a monotonic deque would **still be bit-identical**. That is what puts this in class A rather than class C",
+        "decision_rule": "剖析若显示窗口扫描占 KDJ 整场回测 < 10%，则**不实现**单调队列，并把『决定不做』连同理由一起记下来。",
+        "decision_rule_en": "If the profile shows the window scan is under 10% of a full KDJ backtest, the monotonic deque does **not** get implemented, and the decision not to build it is recorded together with its reason.",
+        "indicator_en": "kdj / HHV-LLV window scan"
+      },
+      {
+        "indicator": "sma / stddev / bollinger",
+        "class": "B",
+        "status": "不改",
+        "status_en": "left alone",
+        "evidence": "窗口内重算，W 是常数（5/20），整场已是 O(N·W)，斜率已经 ~1.0。改成滚动和能到 O(1)，**但那会改变浮点求和顺序，不再逐位等价** —— 逐位等价的优先级高于这个常数因子",
+        "evidence_en": "Recomputed within a window of constant width (5/20), so a whole backtest is already O(N·W) and the fitted slope is already ~1.0. A running sum would make it O(1) — **but it would change the order of floating-point additions and break bit-identity**. Bit-identity outranks that constant factor here"
+      },
+      {
+        "indicator": "pairs / spread 窗口",
+        "class": "B",
+        "status": "不改",
+        "status_en": "left alone",
+        "evidence": "pairs_strategy.cpp — 同上，窗口内重算 mean/stddev",
+        "evidence_en": "pairs_strategy.cpp — same shape: mean/stddev recomputed within the window",
+        "indicator_en": "pairs / spread window"
+      },
+      {
+        "indicator": "returns",
+        "class": "B",
+        "status": "不改",
+        "status_en": "left alone",
+        "evidence": "strategy_context.h — 已经是 O(1)",
+        "evidence_en": "strategy_context.h — already O(1)"
+      },
+      {
+        "indicator": "highest_close / lowest_close",
+        "class": "A",
+        "status": "不改（非热点）",
+        "status_en": "left alone (not hot)",
+        "evidence": "O(lookback)，单调队列可摊还 O(1) 且逐位等价，但**没有任何策略在热路径上调用它** —— 归类 A 不等于该改",
+        "evidence_en": "O(lookback), and a monotonic deque would make it amortised O(1) while staying bit-identical — but **no strategy calls either one on a hot path**. Being in class A is not the same as being worth changing"
+      },
+      {
+        "indicator": "ema / ema_at",
+        "class": "C",
+        "status": "删除",
+        "status_en": "deleted",
+        "evidence": "每根 bar O(N)（整场 O(N²)），**全仓零调用方、零测试**，坐在公开的 context API 上。留着它，『指标已全部增量化』这句话就是假的",
+        "evidence_en": "O(N) per bar — O(N²) over a backtest — with **zero callers and zero tests anywhere in the repo**, sitting on the public context API. Leaving it there makes the claim \"the indicators are all incremental now\" false"
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "id": "P1",
+      "claim": "指标已经不再是热点：25,000 根 bar 上，四个策略各自的指标计算占该策略整场回测时间的比例，全部 < 15%",
+      "claim_en": "The indicators are no longer the hot spot: at 25,000 bars, indicator computation accounts for under 15% of each strategy's total backtest time",
+      "basis": "上一轮把 O(N²) 消掉之后，每根 bar 的指标成本降到常数级；而引擎每根 bar 还要做日历推进、组合估值、订单撮合。若 P1 成立，则『继续优化指标』的收益上限就被钉死在 15% 以内",
+      "predicted": {
+        "max_share_pct": 15.0
+      },
+      "measured": null
+    },
+    {
+      "id": "P2",
+      "claim": "KDJ 的 HHV/LLV 窗口扫描占 KDJ 整场回测 < 10%（**这是一条决策规则，不只是预测**）",
+      "claim_en": "The HHV/LLV window scan is under 10% of a full KDJ backtest (**this one is a decision rule, not just a prediction**)",
+      "basis": "n=9，每根 bar 16 次比较。参照系：25,000 根上 KDJ 5.816 ms、MA_CROSS 5.541 ms，两者只差 0.275 ms（4.7%），而 MA_CROSS 每根 bar 也要做 25 次加法。窗口扫描不可能占大头",
+      "predicted": {
+        "share_pct_upper": 10.0
+      },
+      "measured": null
+    },
+    {
+      "id": "P3",
+      "claim": "若 P2 成立而仍然实现了单调队列，KDJ @25,000 根只会从 5.816 ms 降到 5.65–5.80 ms（省 0–3%），且很可能落在测量噪声里",
+      "claim_en": "If P2 holds and the monotonic deque is built anyway, KDJ at 25,000 bars only moves from 5.816 ms to 5.65–5.80 ms (0–3%), probably inside measurement noise",
+      "basis": "同 P2。这一条是为了在事后区分『没做』与『做了但没用』",
+      "predicted": {
+        "kdj_25k_ms_low": 5.65,
+        "kdj_25k_ms_high": 5.8
+      },
+      "measured": null
+    },
+    {
+      "id": "P4",
+      "claim": "BOLLINGER 的 log–log 拟合斜率落在 1.00–1.10（**这个策略从未进过 benchmark，现在不知道答案**）",
+      "claim_en": "BOLLINGER's fitted log–log slope lands in 1.00–1.10 (**this strategy has never been benchmarked; the answer is genuinely unknown right now**)",
+      "basis": "只用 sma(20)+stddev(20)，窗口是常数 → 整场 O(N·20)，阶数为 1",
+      "predicted": {
+        "slope_low": 1.0,
+        "slope_high": 1.1
+      },
+      "measured": null
+    },
+    {
+      "id": "P5",
+      "claim": "MOMENTUM 的 log–log 拟合斜率落在 1.00–1.05（**同样从未测过**）",
+      "claim_en": "MOMENTUM's fitted log–log slope lands in 1.00–1.05 (**also never measured before**)",
+      "basis": "只用 returns(lookback)，已经是 O(1) → 整场严格 O(N)",
+      "predicted": {
+        "slope_low": 1.0,
+        "slope_high": 1.05
+      },
+      "measured": null
+    },
+    {
+      "id": "P6",
+      "claim": "BOLLINGER 与 MOMENTUM @25,000 根的耗时落在 5.0–7.0 ms，与现有四个策略同一量级",
+      "claim_en": "BOLLINGER and MOMENTUM at 25,000 bars cost 5.0–7.0 ms — the same magnitude as the four strategies already measured",
+      "basis": "若 P4/P5 成立，它们和 MA_CROSS 一样是 O(N·常数)，主要成本都在引擎循环",
+      "predicted": {
+        "ms_low": 5.0,
+        "ms_high": 7.0
+      },
+      "measured": null
+    },
+    {
+      "id": "P7",
+      "claim": "引入 update(bar)/reset() 接口之后，MA_CROSS / MACD / RSI / KDJ @25,000 根全部落在改动前的 ±2% 以内",
+      "claim_en": "After the update(bar)/reset() interface lands, MA_CROSS / MACD / RSI / KDJ at 25,000 bars all stay within ±2% of their pre-change timings",
+      "basis": "接口重构只搬运递推算式，一个字符不改，不改变每根 bar 的运算次数。超出 ±2% 就说明重构引入了额外开销（虚函数派发、间接寻址），要回去查",
+      "baseline_ms": {
+        "MA_CROSS": 5.540667,
+        "MACD": 5.737959,
+        "RSI": 5.550084,
+        "KDJ": 5.81625
+      },
+      "predicted": {
+        "tolerance_pct": 2.0
+      },
+      "measured": null
+    },
+    {
+      "id": "P8",
+      "claim": "接口重构之后，指标金标准 fixture 逐位不变（全量重算路径与增量路径都命中）",
+      "claim_en": "After the refactor the golden indicator fixture is still hit bit-for-bit, by both the full-recompute path and the incremental path",
+      "basis": "同 P7：算式原样搬运。这一条若不成立，整个重构作废",
+      "predicted": {
+        "bitwise_identical": true
+      },
+      "measured": null
+    },
+    {
+      "id": "P9",
+      "claim": "『同一进程连跑两场回测，第二场必须等于单独跑一场』这个测试，在补 on_init() 之前会**红**",
+      "claim_en": "The test \"run two backtests in one process; the second must equal a standalone run\" goes **red** before on_init() is implemented",
+      "basis": "ma_cross / macd / rsi / kdj / bollinger 五个策略在成员里存了 prev_* 与 initialized_，而只有 PairsStrategy 覆写了 on_init()。engine.cpp 每场 run 开头都调 on_init()，钩子现成却没人用。第二场的第 0 根 bar 会拿着上一场的 prev_ 值直接判交叉",
+      "predicted": {
+        "test_fails_before_fix": true
+      },
+      "measured": null
+    },
+    {
+      "id": "P10",
+      "claim": "『两个标的装进同一个引擎、共用一个策略实例』这个测试，在补 on_init() 之前也会**红**（跨标的串味）",
+      "claim_en": "The test \"two symbols in one engine sharing one strategy instance\" also goes **red** before the fix (cross-symbol contamination)",
+      "basis": "同 P9，外加 engine.cpp 的注释断言『现有 9 个策略都是从 ctx.history 现算的，故安全』与代码事实不符",
+      "predicted": {
+        "test_fails_before_fix": true
+      },
+      "measured": null
+    },
+    {
+      "id": "P11",
+      "claim": "删除 ema() / ema_at() 不会让任何测试变红",
+      "claim_en": "Deleting ema() / ema_at() turns no test red",
+      "basis": "全仓 grep 零调用方；金标准 fixture 不含 ema 字段",
+      "predicted": {
+        "tests_still_green": true
+      },
+      "measured": null
+    }
+  ]
+}
